@@ -45,11 +45,12 @@ class WEKOProvider(provider.BaseProvider):
         self.nid = self.settings['nid']
         self.BASE_URL = self.settings['url']
 
-        self.token = self.credentials['token']
+        self.password = self.credentials['password']
         self.user_id = self.credentials['user_id']
         self.index_id = self.settings['index_id']
         self.index_title = self.settings['index_title']
-        self.connection = client.connect_or_error(self.BASE_URL, self.token)
+        self.connection = client.connect_or_error(self.BASE_URL, self.user_id,
+                                                  self.password)
 
         self._metadata_cache = {}
 

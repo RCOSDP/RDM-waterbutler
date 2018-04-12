@@ -32,8 +32,8 @@ def auth():
 @pytest.fixture
 def credentials():
     return {
-        'token': 'open inside',
-        'user_id': 'requester'
+        'user_id': 'requester',
+        'password': 'secret'
     }
 
 
