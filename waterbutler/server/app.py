@@ -77,6 +77,7 @@ def serve():
         address=server_settings.ADDRESS,
         xheaders=server_settings.XHEADERS,
         max_body_size=server_settings.MAX_BODY_SIZE,
+        max_buffer_size=server_settings.MAX_BUFFER_SIZE,
         ssl_options=ssl_options,
     )
 
