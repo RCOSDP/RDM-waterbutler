@@ -576,7 +576,7 @@ class OSFStorageProvider(provider.BaseProvider):
 
         try:
             metadata = await provider.metadata(remote_complete_path)
-        except exceptions.MetadataError as e:
+        except (exceptions.MetadataError, exceptions.NotFoundError) as e:
             if e.code != 404:
                 raise
             metadata, _ = await provider.move(provider, remote_pending_path, remote_complete_path)
