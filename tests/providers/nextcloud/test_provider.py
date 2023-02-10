@@ -616,21 +616,40 @@ class TestMetadataFolder:
     async def test_metadata_folder_path_is_dir(self, provider, file_metadata, file_revision_metadata, file_metadata_object,
                                      file_metadata_2, file_checksum, file_checksum_2, file_checksum_3):
 
+        # Define shared values
+        checksum_api_path = 'apps/checksum_api/api/checksum?path=/my_folder/dissertation.aux&hash=md5,sha256,sha512'
+        revision_path = '&revision=1591864889'
+
+        # Setup path for the _metadata_folder method
         path = WaterButlerPath('/dissertation.aux', prepend=provider.folder)
+
+        # Setup url for call metadata
         url = provider._webdav_url_ + path.full_path
         aiohttpretty.register_uri('PROPFIND', url, body=file_metadata, auto_length=True, status=207)
+
+        # Setup url and call revision
         url = provider._dav_url_ + 'versions/' + provider.credentials['username'] + '/versions/' + file_metadata_object.fileid
         aiohttpretty.register_uri('PROPFIND', url, body=file_revision_metadata, auto_length=True, status=207)
-        checksum_url = provider._ocs_url + 'apps/checksum_api/api/checksum?path=/my_folder/dissertation.aux&hash=md5,sha256,sha512'
+
+        # Setup url and call checksum api for file_checksum
+        checksum_url = provider._ocs_url + checksum_api_path
         aiohttpretty.register_uri('GET', checksum_url, body=file_checksum, auto_length=True, status=200)
-        checksum_url = provider._ocs_url + 'apps/checksum_api/api/checksum?path=/my_folder/dissertation.aux&hash=md5,sha256,sha512&revision=1591876099'
+
+        # Setup url and call checksum api for file_checksum_2
+        checksum_url = provider._ocs_url + checksum_api_path + revision_path
         aiohttpretty.register_uri('GET', checksum_url, body=file_checksum_2, auto_length=True, status=200)
-        checksum_url = provider._ocs_url + 'apps/checksum_api/api/checksum?path=/my_folder/dissertation.aux&hash=md5,sha256,sha512&revision=1591864889'
+
+        # Call checksum api for file_checksum_3
         aiohttpretty.register_uri('GET', checksum_url, body=file_checksum_3, auto_length=True, status=200)
+
+        # Setup return value for mock
         future = asyncio.Future()
         future.set_result([FilePathFactory('/my_folder/dissertation.aux')])
+
         with mock.patch('waterbutler.providers.nextcloud.utils.parse_dav_response', return_value=future):
             result = await provider._metadata_folder(path)
+
+            # Assert result
             assert isinstance(result, list)
             assert len(result) > 0
 
