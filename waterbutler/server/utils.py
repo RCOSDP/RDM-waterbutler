@@ -130,6 +130,7 @@ class UtilMixin:
                 # Temp fix, write does not accept bytearrays currently
                 if isinstance(chunk, bytearray):
                     chunk = bytes(chunk)
+                self.set_header('Content-Length', len(chunk))
                 self.write(chunk)
                 self.bytes_downloaded += len(chunk)
                 del chunk
