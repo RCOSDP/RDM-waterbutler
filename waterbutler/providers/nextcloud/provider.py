@@ -177,7 +177,7 @@ class NextcloudProvider(provider.BaseProvider):
         if revision is None:
             download_resp = await self.make_request(
                 'GET',
-                self._webdav_url_ + path.full_path,
+                self._webdav_url_ + path.full_path.replace(' ', '%20'),
                 range=range,
                 expects=(200, 206,),
                 throws=exceptions.DownloadError,
@@ -214,7 +214,7 @@ class NextcloudProvider(provider.BaseProvider):
 
         response = await self.make_request(
             'PUT',
-            self._webdav_url_ + path.full_path,
+            self._webdav_url_ + path.full_path.replace(' ', '%20'),
             data=stream,
             headers={'Content-Length': str(stream.size)},
             expects=(201, 204,),
@@ -234,7 +234,7 @@ class NextcloudProvider(provider.BaseProvider):
         """
         delete_resp = await self.make_request(
             'DELETE',
-            self._webdav_url_ + path.full_path,
+            self._webdav_url_ + path.full_path.replace(' ', '%20'),
             expects=(204,),
             throws=exceptions.DeleteError,
             auth=self._auth,
@@ -267,7 +267,7 @@ class NextcloudProvider(provider.BaseProvider):
             * 207: Multipart response
         """
         response = await self.make_request('PROPFIND',
-            self._webdav_url_ + path.full_path,
+            self._webdav_url_ + path.full_path.replace(' ', '%20'),
             expects=(204, 207),
             throws=exceptions.MetadataError,
             auth=self._auth,
@@ -310,7 +310,7 @@ class NextcloudProvider(provider.BaseProvider):
         query = '<?xml version="1.0" encoding="UTF-8"?> <d:propfind xmlns:d="DAV:" xmlns:nc="http://nextcloud.org/ns" > <d:prop xmlns:oc="http://owncloud.org/ns"> <d:getlastmodified/> <d:getcontentlength/> <d:resourcetype/> <d:getetag/> <d:getcontenttype/> <oc:fileid/>  </d:prop> </d:propfind>'
 
         response = await self.make_request('PROPFIND',
-            self._webdav_url_ + path.full_path,
+            self._webdav_url_ + path.full_path.replace(' ', '%20'),
             data=query,
             expects=(204, 207),
             throws=exceptions.MetadataError,
