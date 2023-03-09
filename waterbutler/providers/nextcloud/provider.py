@@ -109,7 +109,7 @@ class NextcloudProvider(provider.BaseProvider):
         full_path = WaterButlerPath(path, prepend=self.folder)
 
         response = await self.make_request('PROPFIND',
-            self._webdav_url_ + full_path.full_path,
+            self._webdav_url_ + full_path.full_path.replace(' ', '%20'),
             expects=(200, 207, 404),
             throws=exceptions.MetadataError,
             auth=self._auth,
@@ -445,12 +445,12 @@ class NextcloudProvider(provider.BaseProvider):
 
         resp = await self.make_request(
             operation,
-            self._webdav_url_ + src_path.full_path,
+            self._webdav_url_ + src_path.full_path.replace(' ', '%20'),
             expects=(201, 204),  # WebDAV MOVE/COPY: 201 = Created, 204 = Updated existing
             throws=exceptions.IntraCopyError,
             auth=self._auth,
             connector=self.connector(),
-            headers={'Destination': '/remote.php/webdav' + dest_path.full_path}
+            headers={'Destination': '/remote.php/webdav' + dest_path.full_path.replace(' ', '%20')}
         )
         await resp.release()
 
