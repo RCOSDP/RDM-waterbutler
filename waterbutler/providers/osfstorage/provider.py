@@ -58,7 +58,7 @@ class OSFStorageProvider(provider.BaseProvider):
         return await self.make_request(method, url, data=data, params=params, **kwargs)
 
     async def validate_v1_path(self, path, **kwargs):
-        if path == '/':
+        if path == '/' or path.strip('/') == self.root_id:
             return WaterButlerPath('/', _ids=[self.root_id], folder=True)
 
         implicit_folder = path.endswith('/')
@@ -80,7 +80,7 @@ class OSFStorageProvider(provider.BaseProvider):
         return WaterButlerPath('/'.join(names), _ids=ids, folder=explicit_folder)
 
     async def validate_path(self, path, **kwargs):
-        if path == '/':
+        if path == '/' or path.strip('/') == self.root_id:
             return WaterButlerPath('/', _ids=[self.root_id], folder=True)
 
         ends_with_slash = path.endswith('/')
