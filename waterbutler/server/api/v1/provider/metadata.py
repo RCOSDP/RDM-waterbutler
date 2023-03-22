@@ -42,11 +42,14 @@ class MetadataMixin:
         version = self.requested_version
 
         next_token = None
+        token = None
         if 'next_token' in self.request.query_arguments:
             next_token = self.request.query_arguments['next_token'][0].decode("utf-8")
 
         data = await self.provider.metadata(self.path, version=version, revision=version, next_token=next_token)
-        data, token = self.provider.handle_data(data)
+
+        if 'next_token' in self.request.query_arguments:
+            data, token = self.provider.handle_data(data)
 
         ret = {'data': [x.json_api_serialized(self.resource) for x in data]}
         if token is not None:

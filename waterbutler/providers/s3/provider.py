@@ -644,7 +644,9 @@ class S3Provider(provider.BaseProvider):
         return (await self._metadata_file(path, revision=revision))
 
     def handle_data(self, data):
-        token = data.pop()
+        token = None
+        if not isinstance(data, S3FileMetadataHeaders):
+            token = data.pop()
 
         return data, token or ''
 
@@ -744,7 +746,8 @@ class S3Provider(provider.BaseProvider):
             else:
                 items.append(S3FileMetadata(content))
 
-        items.append(next_token_string)
+        if next_token is not None:
+            items.append(next_token_string)
         return items
 
     async def _check_region(self):
