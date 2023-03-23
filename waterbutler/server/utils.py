@@ -131,7 +131,7 @@ class UtilMixin:
                 if isinstance(chunk, bytearray):
                     chunk = bytes(chunk)
                 self.set_header('Content-Length', str(len(chunk)))
-                if stream.size:
+                if hasattr(stream, 'size'):
                     if stream.size > len(chunk):
                         self.set_header('Content-Length', str(stream.size))
                 self.write(chunk)
