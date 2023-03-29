@@ -11,6 +11,7 @@ from urllib import parse
 import furl
 import aiohttp
 from aiohttp.client import _RequestContextManager
+from yarl import URL
 
 from waterbutler.core import streams
 from waterbutler.core import exceptions
@@ -286,6 +287,7 @@ class BaseProvider(metaclass=abc.ABCMeta):
         while retry >= 0:
             # Don't overwrite the callable ``url`` so that signed URLs are refreshed for every retry
             non_callable_url = url() if callable(url) else url
+            non_callable_url = URL(non_callable_url, encoded=True)
             try:
                 self.provider_metrics.incr('requests.count')
                 # TODO: use a `dict` to select methods with either `lambda` or `functools.partial`
@@ -771,6 +773,9 @@ class BaseProvider(metaclass=abc.ABCMeta):
         :raises: :class:`.MetadataError`
         """
         raise NotImplementedError
+
+    def handle_data(self, data):
+        return data, None
 
     @abc.abstractmethod
     async def validate_v1_path(self, path: str, **kwargs) -> wb_path.WaterButlerPath:

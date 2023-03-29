@@ -40,8 +40,22 @@ class MetadataMixin:
             return (await self.download_folder_as_zip())
 
         version = self.requested_version
-        data = await self.provider.metadata(self.path, version=version, revision=version)
-        return self.write({'data': [x.json_api_serialized(self.resource) for x in data]})
+
+        next_token = None
+        token = None
+        if 'next_token' in self.request.query_arguments:
+            next_token = self.request.query_arguments['next_token'][0].decode("utf-8")
+
+        data = await self.provider.metadata(self.path, version=version, revision=version, next_token=next_token)
+
+        if 'next_token' in self.request.query_arguments:
+            data, token = self.provider.handle_data(data)
+
+        ret = {'data': [x.json_api_serialized(self.resource) for x in data]}
+        if token is not None:
+            ret['next_token'] = token
+
+        return self.write(ret)
 
     async def get_file(self):
         if 'meta' in self.request.query_arguments:
