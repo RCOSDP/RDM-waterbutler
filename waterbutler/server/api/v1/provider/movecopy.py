@@ -51,7 +51,7 @@ class MoveCopyMixin:
             'provider': self.dest_provider.serialized()
         })
 
-    async def move_or_copy(self, is_check_permission=True):
+    async def move_or_copy(self):
         """Copy, move, and rename files and folders.
 
         **Auth actions**: ``copy``, ``move``, or ``rename``
@@ -87,7 +87,6 @@ class MoveCopyMixin:
             auth_type=AuthType.SOURCE,
             path=self.path,
             version=self.requested_version,
-            is_check_permission=is_check_permission,
         )
         self.provider = make_provider(
             provider,
@@ -95,8 +94,6 @@ class MoveCopyMixin:
             self.auth['credentials'],
             self.auth['settings']
         )
-        if hasattr(self.provider, 'is_check_permission'):
-            self.provider.is_check_permission = is_check_permission
         self.path = await self.provider.validate_v1_path(self.path, **self.arguments)
 
         if auth_action == 'rename':  # 'rename' implies the file/folder does not change location
@@ -127,7 +124,6 @@ class MoveCopyMixin:
                 self.request,
                 action=auth_action,
                 auth_type=AuthType.DESTINATION,
-                is_check_permission=is_check_permission,
                 path=path,
             )
             self.dest_provider = make_provider(

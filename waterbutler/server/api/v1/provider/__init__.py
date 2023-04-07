@@ -50,13 +50,10 @@ class ProviderHandler(core.BaseHandler, CreateMixin, MetadataMixin, MoveCopyMixi
         if method == 'options':
             return
 
-        self.is_check_permission = True
         self.arguments = {
             key: list_or_value(value)
             for key, value in self.request.query_arguments.items()
         }
-        if 'is_check_permission' in self.arguments and self.arguments['is_check_permission'] == 'False':
-            self.is_check_permission = False
 
         # Going with version as its the most correct term
         # TODO Change all references of revision to version @chrisseto
@@ -93,8 +90,7 @@ class ProviderHandler(core.BaseHandler, CreateMixin, MetadataMixin, MoveCopyMixi
                 self.resource, provider, self.request,
                 path=self.path, version=self.requested_version,
                 callback_log=self.callback_log,
-                location_id=self.location_id,
-                is_check_permission=self.is_check_permission)
+                location_id=self.location_id)
             self.provider = utils.make_provider(
                 provider, self.auth['auth'],
                 self.auth['credentials'], self.auth['settings'])
@@ -139,7 +135,7 @@ class ProviderHandler(core.BaseHandler, CreateMixin, MetadataMixin, MoveCopyMixi
         return (await self.create_folder())
 
     async def post(self, **_):
-        return (await self.move_or_copy(self.is_check_permission))
+        return (await self.move_or_copy())
 
     async def delete(self, **_):
         self.confirm_delete = int(self.get_query_argument('confirm_delete', default=0))

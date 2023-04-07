@@ -45,7 +45,6 @@ class OSFStorageProvider(provider.BaseProvider):
         self.root_id = settings['rootId']
         self.BASE_URL = settings['baseUrl']
         self.provider_name = settings['storage'].get('provider')
-        self.is_check_permission = True
 
     async def make_signed_request(self, method, url, data=None, params=None, ttl=100, **kwargs):
         url, data, params = self.build_signed_url(
@@ -536,8 +535,7 @@ class OSFStorageProvider(provider.BaseProvider):
                     'name': dest_path.name,
                     'node': dest_provider.nid,
                     'parent': dest_path.parent.identifier
-                },
-                'is_check_permission': self.is_check_permission
+                }
             }),
             headers={'Content-Type': 'application/json'},
             expects=(200, 201)

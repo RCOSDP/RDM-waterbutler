@@ -63,7 +63,9 @@ async def log_to_callback(action, source=None, destination=None, start_time=None
 
     if not auth['callback_url']:
         return None
+    logger.info(f'log_to_callback payload: {log_payload}')
     resp_status, resp_data = await utils.send_signed_request('PUT', auth['callback_url'], log_payload)
+    logger.info(f'log_to_callback resp_status: {resp_status}')
 
     if resp_status // 100 != 2:
         raise Exception(

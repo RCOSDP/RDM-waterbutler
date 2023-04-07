@@ -104,7 +104,7 @@ class OsfAuthHandler(BaseAuthHandler):
         return payload
 
     async def get(self, resource, provider, request, action=None, auth_type=AuthType.SOURCE,
-                  path='', version=None, callback_log=True, location_id=None, is_check_permission=True):
+                  path='', version=None, callback_log=True, location_id=None):
         """Used for v1"""
         method = request.method.lower()
 
@@ -167,7 +167,6 @@ class OsfAuthHandler(BaseAuthHandler):
                 'uri': request.uri,
             },
             'callback_log': callback_log,
-            'is_check_permission': is_check_permission,
         }
         if resource == EXPORT_DATA_FAKE_NODE_ID:
             data['location_id'] = location_id
