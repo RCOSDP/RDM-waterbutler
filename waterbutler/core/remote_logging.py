@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 @utils.async_retry(retries=5, backoff=5)
 async def log_to_callback(action, source=None, destination=None, start_time=None, errors=[],
-                          request={}):
+                          request={}, task_id=None, upload_datetime=None):
     """PUT a logging payload back to the callback given by the auth provider."""
 
     auth = getattr(destination, 'auth', source.auth)
@@ -31,6 +31,8 @@ async def log_to_callback(action, source=None, destination=None, start_time=None
         'auth': auth,
         'time': time.time() + 60,
         'errors': errors,
+        'task_id': task_id,
+        'upload_datetime': str(upload_datetime)
     }
 
     if request:
@@ -63,9 +65,7 @@ async def log_to_callback(action, source=None, destination=None, start_time=None
 
     if not auth['callback_url']:
         return None
-    logger.info(f'log_to_callback payload: {log_payload}')
     resp_status, resp_data = await utils.send_signed_request('PUT', auth['callback_url'], log_payload)
-    logger.info(f'log_to_callback resp_status: {resp_status}')
 
     if resp_status // 100 != 2:
         raise Exception(
@@ -216,11 +216,13 @@ async def _send_to_keen(payload, collection, project_id, write_key, action, doma
 
 
 def log_file_action(action, source, api_version, destination=None, request={},
-                    start_time=None, errors=None, bytes_downloaded=None, bytes_uploaded=None):
+                    start_time=None, errors=None, bytes_downloaded=None, bytes_uploaded=None,
+                    task_id=None, upload_datetime=None):
     """Kick off logging actions in the background. Returns array of asyncio.Tasks."""
     return [
         log_to_callback(action, source=source, destination=destination,
-                        start_time=start_time, errors=errors, request=request,),
+                        start_time=start_time, errors=errors, request=request, task_id=task_id,
+                        upload_datetime=upload_datetime),
         asyncio.ensure_future(
             log_to_keen(action, source=source, destination=destination,
                         errors=errors, request=request, api_version=api_version,

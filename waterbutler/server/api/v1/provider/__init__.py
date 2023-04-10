@@ -54,6 +54,12 @@ class ProviderHandler(core.BaseHandler, CreateMixin, MetadataMixin, MoveCopyMixi
             key: list_or_value(value)
             for key, value in self.request.query_arguments.items()
         }
+        request_task_id = None
+        request_upload_datetime = None
+        if 'task_id' in self.arguments:
+            request_task_id = self.arguments['task_id']
+        if 'upload_datetime' in self.arguments:
+            request_upload_datetime = self.arguments['upload_datetime']
 
         # Going with version as its the most correct term
         # TODO Change all references of revision to version @chrisseto
@@ -85,15 +91,23 @@ class ProviderHandler(core.BaseHandler, CreateMixin, MetadataMixin, MoveCopyMixi
 
         # Delay setup of the provider when method is post, as we need to evaluate the json body
         # action.
+        self.task_id = None
+        self.upload_datetime = None
         if method != 'post':
             self.auth = await auth_handler.get(
                 self.resource, provider, self.request,
                 path=self.path, version=self.requested_version,
                 callback_log=self.callback_log,
-                location_id=self.location_id)
+                location_id=self.location_id,
+                task_id=request_task_id,
+                upload_datetime=request_upload_datetime)
             self.provider = utils.make_provider(
                 provider, self.auth['auth'],
                 self.auth['credentials'], self.auth['settings'])
+            if 'task_id' in self.auth:
+                self.task_id = self.auth['task_id']
+            if 'upload_datetime' in self.auth:
+                self.upload_datetime = self.auth['upload_datetime']
             self.path = await self.provider.validate_v1_path(self.path, **self.arguments)
 
         self.target_path = None
@@ -231,4 +245,5 @@ class ProviderHandler(core.BaseHandler, CreateMixin, MetadataMixin, MoveCopyMixi
         remote_logging.log_file_action(action, source=source, destination=destination, api_version='v1',
                                        request=remote_logging._serialize_request(self.request),
                                        bytes_downloaded=self.bytes_downloaded,
-                                       bytes_uploaded=self.bytes_uploaded,)
+                                       bytes_uploaded=self.bytes_uploaded, task_id=self.task_id,
+                                       upload_datetime=self.upload_datetime)
