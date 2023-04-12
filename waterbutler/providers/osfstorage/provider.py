@@ -170,10 +170,10 @@ class OSFStorageProvider(provider.BaseProvider):
         return self.settings['storage']['bucket'] == other.settings['storage']['bucket']
 
     def can_intra_copy(self, other, path=None):
-        return isinstance(other, self.__class__) and self.is_same_region(other)
+        return isinstance(other, self.__class__)
 
     def can_intra_move(self, other, path=None):
-        return isinstance(other, self.__class__) and self.is_same_region(other)
+        return isinstance(other, self.__class__)
 
     async def intra_move(self, dest_provider, src_path, dest_path):
         return await self._do_intra_move_or_copy('move', dest_provider, src_path, dest_path)
