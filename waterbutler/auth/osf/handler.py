@@ -104,8 +104,7 @@ class OsfAuthHandler(BaseAuthHandler):
         return payload
 
     async def get(self, resource, provider, request, action=None, auth_type=AuthType.SOURCE,
-                  path='', version=None, callback_log=True, location_id=None, task_id=None,
-                  upload_datetime=None):
+                  path='', version=None, callback_log=True, location_id=None):
         """Used for v1"""
         method = request.method.lower()
 
@@ -167,9 +166,7 @@ class OsfAuthHandler(BaseAuthHandler):
                 'origin': request.headers.get('Origin'),
                 'uri': request.uri,
             },
-            'callback_log': callback_log,
-            'task_id': task_id,
-            'upload_datetime': upload_datetime
+            'callback_log': callback_log
         }
         if resource == EXPORT_DATA_FAKE_NODE_ID:
             data['location_id'] = location_id

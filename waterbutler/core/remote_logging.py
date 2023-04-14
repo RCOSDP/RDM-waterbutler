@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 @utils.async_retry(retries=5, backoff=5)
 async def log_to_callback(action, source=None, destination=None, start_time=None, errors=[],
-                          request={}, task_id=None, upload_datetime=None):
+                          request={}):
     """PUT a logging payload back to the callback given by the auth provider."""
 
     auth = getattr(destination, 'auth', source.auth)
@@ -31,8 +31,6 @@ async def log_to_callback(action, source=None, destination=None, start_time=None
         'auth': auth,
         'time': time.time() + 60,
         'errors': errors,
-        'task_id': task_id,
-        'upload_datetime': str(upload_datetime)
     }
 
     if request:
@@ -216,13 +214,11 @@ async def _send_to_keen(payload, collection, project_id, write_key, action, doma
 
 
 def log_file_action(action, source, api_version, destination=None, request={},
-                    start_time=None, errors=None, bytes_downloaded=None, bytes_uploaded=None,
-                    task_id=None, upload_datetime=None):
+                    start_time=None, errors=None, bytes_downloaded=None, bytes_uploaded=None):
     """Kick off logging actions in the background. Returns array of asyncio.Tasks."""
     return [
         log_to_callback(action, source=source, destination=destination,
-                        start_time=start_time, errors=errors, request=request, task_id=task_id,
-                        upload_datetime=upload_datetime),
+                        start_time=start_time, errors=errors, request=request,),
         asyncio.ensure_future(
             log_to_keen(action, source=source, destination=destination,
                         errors=errors, request=request, api_version=api_version,

@@ -95,9 +95,7 @@ class TestOsfAuthHandler(ServerTestCase):
                         'uri': settings.API_URL,
                         'user_agent': None,
                     },
-                    'callback_log': True,
-                    'upload_datetime': None,
-                    'task_id': None
+                    'callback_log': True
                 }, cookie='auth', view_only='1')
             else:
                 self.handler.build_payload.assert_called_with({
@@ -113,9 +111,7 @@ class TestOsfAuthHandler(ServerTestCase):
                         'uri': settings.API_URL,
                         'user_agent': None,
                     },
-                    'callback_log': True,
-                    'upload_datetime': None,
-                    'task_id': None
+                    'callback_log': True
                 }, cookie='auth', view_only='1')
 
     @tornado.testing.gen_test
@@ -145,8 +141,6 @@ class TestOsfAuthHandler(ServerTestCase):
             },
             'callback_log': True,
             'location_id': 1,
-            'upload_datetime': None,
-            'task_id': None
         }, cookie=None, view_only=None)
 
 
