@@ -1440,11 +1440,10 @@ class TestMetadata:
         result = await provider.metadata(path)
 
         assert isinstance(result, list)
-        assert len(result) == 4
+        assert len(result) == 3
         assert result[0].name == '   photos'
         assert result[1].name == 'my-image.jpg'
         assert result[2].extra['md5'] == '1b2cf535f27731c974343645a3985328'
-        assert result[3] == ''
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
@@ -1459,11 +1458,10 @@ class TestMetadata:
         result = await provider.metadata(path, revision=None, next_token='')
 
         assert isinstance(result, list)
-        assert len(result) == 4
+        assert len(result) == 3
         assert result[0].name == '   photos'
         assert result[1].name == 'my-image.jpg'
         assert result[2].extra['md5'] == '1b2cf535f27731c974343645a3985328'
-        assert result[3] == ''
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
@@ -1478,11 +1476,10 @@ class TestMetadata:
         result = await provider._metadata_folder(path, next_token='')
 
         assert isinstance(result, list)
-        assert len(result) == 4
+        assert len(result) == 3
         assert result[0].name == '   photos'
         assert result[1].name == 'my-image.jpg'
         assert result[2].extra['md5'] == '1b2cf535f27731c974343645a3985328'
-        assert result[3] == ''
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
@@ -1495,7 +1492,7 @@ class TestMetadata:
         result = await provider.metadata(path)
 
         assert isinstance(result, list)
-        assert len(result) == 3
+        assert len(result) == 2
         for fobj in result[:-1]:
             assert fobj.name != path.full_path
 
@@ -1511,7 +1508,7 @@ class TestMetadata:
         result = await provider.metadata(path)
 
         assert isinstance(result, list)
-        assert len(result) == 2
+        assert len(result) == 1
         assert result[0].kind == 'folder'
 
     # @pytest.mark.asyncio
@@ -1537,7 +1534,7 @@ class TestMetadata:
         result = await provider.metadata(path)
 
         assert isinstance(result, list)
-        assert len(result) == 1
+        assert len(result) == 0
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
