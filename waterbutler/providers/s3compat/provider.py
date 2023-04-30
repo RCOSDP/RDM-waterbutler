@@ -687,7 +687,9 @@ class S3CompatProvider(provider.BaseProvider):
         return (await self._metadata_file(path, revision=revision))
 
     def handle_data(self, data):
-        token = data.pop()
+        token = None
+        if not isinstance(data, S3CompatFileMetadataHeaders):
+            token = data.pop()
 
         return data, token or ''
 
@@ -780,5 +782,6 @@ class S3CompatProvider(provider.BaseProvider):
             else:
                 items.append(S3CompatFileMetadata(self, content))
 
-        items.append(next_token_string)
+        if next_token_string:
+            items.append(next_token_string)
         return items

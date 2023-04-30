@@ -58,7 +58,7 @@ class OSFStorageProvider(provider.BaseProvider):
         return await self.make_request(method, url, data=data, params=params, **kwargs)
 
     async def validate_v1_path(self, path, **kwargs):
-        if path == '/':
+        if path == '/' or path.strip('/') == self.root_id:
             return WaterButlerPath('/', _ids=[self.root_id], folder=True)
 
         implicit_folder = path.endswith('/')
@@ -80,7 +80,7 @@ class OSFStorageProvider(provider.BaseProvider):
         return WaterButlerPath('/'.join(names), _ids=ids, folder=explicit_folder)
 
     async def validate_path(self, path, **kwargs):
-        if path == '/':
+        if path == '/' or path.strip('/') == self.root_id:
             return WaterButlerPath('/', _ids=[self.root_id], folder=True)
 
         ends_with_slash = path.endswith('/')
@@ -170,10 +170,10 @@ class OSFStorageProvider(provider.BaseProvider):
         return self.settings['storage']['bucket'] == other.settings['storage']['bucket']
 
     def can_intra_copy(self, other, path=None):
-        return isinstance(other, self.__class__) and self.is_same_region(other)
+        return isinstance(other, self.__class__)
 
     def can_intra_move(self, other, path=None):
-        return isinstance(other, self.__class__) and self.is_same_region(other)
+        return isinstance(other, self.__class__)
 
     async def intra_move(self, dest_provider, src_path, dest_path):
         return await self._do_intra_move_or_copy('move', dest_provider, src_path, dest_path)

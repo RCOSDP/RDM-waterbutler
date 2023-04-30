@@ -124,6 +124,7 @@ class MoveCopyMixin:
                 self.request,
                 action=auth_action,
                 auth_type=AuthType.DESTINATION,
+                path=path,
             )
             self.dest_provider = make_provider(
                 self.json.get('provider', self.provider.NAME),
