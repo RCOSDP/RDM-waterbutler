@@ -42,7 +42,7 @@ class ProviderHandler(core.BaseHandler, CreateMixin, MetadataMixin, MoveCopyMixi
         method = self.request.method.lower()
 
         # TODO Find a nicer way to handle this
-        if method == 'options' or self.path_kwargs['path'].endswith(('.css', '.map')):
+        if method == 'options':
             return
 
         self.arguments = {
