@@ -164,16 +164,16 @@ class OSFStorageProvider(provider.BaseProvider):
                                                   'different provider classes.'
 
         # Region does not apply to local development with filesystem as storage backend.
-        if self.settings['storage']['provider'] == 'filesystem':
+        if self.settings['storage']['provider'] == 'filesystem' or other.settings['storage']['provider'] == 'filesystem':
             return True
         # For 1-to-1 bucket-region mapping, bucket is the same if and only if region is the same
         return self.settings['storage']['bucket'] == other.settings['storage']['bucket']
 
     def can_intra_copy(self, other, path=None):
-        return isinstance(other, self.__class__)
+        return isinstance(other, self.__class__) and self.is_same_region(other)
 
     def can_intra_move(self, other, path=None):
-        return isinstance(other, self.__class__)
+        return isinstance(other, self.__class__) and self.is_same_region(other)
 
     async def intra_move(self, dest_provider, src_path, dest_path):
         return await self._do_intra_move_or_copy('move', dest_provider, src_path, dest_path)
@@ -391,9 +391,9 @@ class OSFStorageProvider(provider.BaseProvider):
             raise exceptions.OverwriteSelfError(src_path)
 
         self.provider_metrics.add('move.can_intra_move', False)
-        if self.can_intra_move(dest_provider, src_path):
-            self.provider_metrics.add('move.can_intra_move', True)
-            return await self.intra_move(*args)
+        if self.can_intra_copy(dest_provider, src_path) and not isinstance(dest_provider, self.__class__):
+            self.provider_metrics.add('copy.can_intra_copy', True)
+            return await self.intra_copy(*args)
 
         if src_path.is_dir:
             meta_data, created = await self._folder_file_op(self.move, *args, **kwargs)  # type: ignore
@@ -458,7 +458,7 @@ class OSFStorageProvider(provider.BaseProvider):
             raise exceptions.OverwriteSelfError(src_path)
 
         self.provider_metrics.add('copy.can_intra_copy', False)
-        if self.can_intra_copy(dest_provider, src_path):
+        if self.can_intra_copy(dest_provider, src_path) and not isinstance(dest_provider, self.__class__):
             self.provider_metrics.add('copy.can_intra_copy', True)
             return await self.intra_copy(*args)
 
