@@ -48,7 +48,7 @@ class MetadataMixin:
 
         data = await self.provider.metadata(self.path, version=version, revision=version, next_token=next_token)
 
-        if 'next_token' in self.request.query_arguments:
+        if data and isinstance(data[-1], str):
             data, token = self.provider.handle_data(data)
 
         ret = {'data': [x.json_api_serialized(self.resource) for x in data]}
