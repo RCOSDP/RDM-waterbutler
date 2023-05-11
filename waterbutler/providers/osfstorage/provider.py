@@ -391,9 +391,9 @@ class OSFStorageProvider(provider.BaseProvider):
             raise exceptions.OverwriteSelfError(src_path)
 
         self.provider_metrics.add('move.can_intra_move', False)
-        if self.can_intra_copy(dest_provider, src_path) and not isinstance(dest_provider, self.__class__):
-            self.provider_metrics.add('copy.can_intra_copy', True)
-            return await self.intra_copy(*args)
+        if self.can_intra_move(dest_provider, src_path) and isinstance(dest_provider, self.__class__) and dest_provider.root_id == self.root_id:
+            self.provider_metrics.add('move.can_intra_move', True)
+            return await self.intra_move(*args)
 
         if src_path.is_dir:
             meta_data, created = await self._folder_file_op(self.move, *args, **kwargs)  # type: ignore
@@ -458,7 +458,7 @@ class OSFStorageProvider(provider.BaseProvider):
             raise exceptions.OverwriteSelfError(src_path)
 
         self.provider_metrics.add('copy.can_intra_copy', False)
-        if self.can_intra_copy(dest_provider, src_path) and not isinstance(dest_provider, self.__class__):
+        if self.can_intra_copy(dest_provider, src_path) and isinstance(dest_provider, self.__class__) and dest_provider.root_id == self.root_id:
             self.provider_metrics.add('copy.can_intra_copy', True)
             return await self.intra_copy(*args)
 
