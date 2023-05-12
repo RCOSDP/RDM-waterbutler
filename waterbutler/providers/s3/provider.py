@@ -746,7 +746,7 @@ class S3Provider(provider.BaseProvider):
             else:
                 items.append(S3FileMetadata(content))
 
-        if next_token_string:
+        if next_token is not None:
             items.append(next_token_string)
         return items
 

@@ -782,6 +782,6 @@ class S3CompatProvider(provider.BaseProvider):
             else:
                 items.append(S3CompatFileMetadata(self, content))
 
-        if next_token_string:
+        if next_token is not None:
             items.append(next_token_string)
         return items
