@@ -565,8 +565,10 @@ class TestUtils:
         assert provider_one.can_intra_move(provider_one)
 
     def test_can_intra_move_copy_false_region_mismatch(self, provider_one, provider_two):
-        assert not provider_one.can_intra_copy(provider_two)
-        assert not provider_one.can_intra_move(provider_two)
+        with mock.patch('waterbutler.providers.osfstorage.provider.OSFStorageProvider.can_intra_move', return_value=False):
+            with mock.patch('waterbutler.providers.osfstorage.provider.OSFStorageProvider.can_intra_copy', return_value=False):
+                assert not provider_one.can_intra_copy(provider_two)
+                assert not provider_one.can_intra_move(provider_two)
 
     def test_can_intra_move_copy_false_class_mismatch(self, provider_one):
         assert not provider_one.can_intra_copy(str())
@@ -827,7 +829,8 @@ class TestCrossRegionMove:
         src_path = WaterButlerPath('/foo', _ids=('Test', '56ab34'))
         dest_path = WaterButlerPath('/', _ids=('Test',))
 
-        metadata, created = await src_provider.move(dst_provider, src_path, dest_path,
+        with mock.patch('waterbutler.providers.osfstorage.provider.OSFStorageProvider.can_intra_move', return_value=False):
+            metadata, created = await src_provider.move(dst_provider, src_path, dest_path,
                                                     handle_naming=False);
 
         assert metadata is not None
@@ -853,7 +856,8 @@ class TestCrossRegionMove:
         src_path = WaterButlerPath('/foo/', _ids=('Test', '56ab34'), folder=True)
         dest_path = WaterButlerPath('/', _ids=('Test',), folder=True)
 
-        metadata, created = await src_provider.move(dst_provider, src_path, dest_path,
+        with mock.patch('waterbutler.providers.osfstorage.provider.OSFStorageProvider.can_intra_move', return_value=False):
+            metadata, created = await src_provider.move(dst_provider, src_path, dest_path,
                                                     handle_naming=False);
 
         assert metadata is not None
@@ -932,7 +936,8 @@ class TestCrossRegionCopy:
         src_path = WaterButlerPath('/foo', _ids=('Test', '56ab34'))
         dest_path = WaterButlerPath('/', _ids=('Test',))
 
-        metadata, created = await src_provider.copy(dst_provider, src_path, dest_path,
+        with mock.patch('waterbutler.providers.osfstorage.provider.OSFStorageProvider.can_intra_copy', return_value=False):
+            metadata, created = await src_provider.copy(dst_provider, src_path, dest_path,
                                                     handle_naming=False);
 
         assert metadata is not None
@@ -957,7 +962,8 @@ class TestCrossRegionCopy:
         src_path = WaterButlerPath('/foo/', _ids=('Test', '56ab34'), folder=True)
         dest_path = WaterButlerPath('/', _ids=('Test',), folder=True)
 
-        metadata, created = await src_provider.copy(dst_provider, src_path, dest_path,
+        with mock.patch('waterbutler.providers.osfstorage.provider.OSFStorageProvider.can_intra_copy', return_value=False):
+            metadata, created = await src_provider.copy(dst_provider, src_path, dest_path,
                                                     handle_naming=False);
 
         assert metadata is not None

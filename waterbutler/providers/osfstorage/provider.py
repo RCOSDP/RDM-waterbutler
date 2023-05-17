@@ -164,7 +164,7 @@ class OSFStorageProvider(provider.BaseProvider):
                                                   'different provider classes.'
 
         # Region does not apply to local development with filesystem as storage backend.
-        if self.settings['storage']['provider'] == 'filesystem':
+        if self.settings['storage']['provider'] == 'filesystem' or other.settings['storage']['provider'] == 'filesystem':
             return True
         # For 1-to-1 bucket-region mapping, bucket is the same if and only if region is the same
         return self.settings['storage']['bucket'] == other.settings['storage']['bucket']
@@ -391,7 +391,7 @@ class OSFStorageProvider(provider.BaseProvider):
             raise exceptions.OverwriteSelfError(src_path)
 
         self.provider_metrics.add('move.can_intra_move', False)
-        if self.can_intra_move(dest_provider, src_path):
+        if self.can_intra_move(dest_provider, src_path) and isinstance(dest_provider, self.__class__) and dest_provider.root_id == self.root_id:
             self.provider_metrics.add('move.can_intra_move', True)
             return await self.intra_move(*args)
 
@@ -458,7 +458,7 @@ class OSFStorageProvider(provider.BaseProvider):
             raise exceptions.OverwriteSelfError(src_path)
 
         self.provider_metrics.add('copy.can_intra_copy', False)
-        if self.can_intra_copy(dest_provider, src_path):
+        if self.can_intra_copy(dest_provider, src_path) and isinstance(dest_provider, self.__class__) and dest_provider.root_id == self.root_id:
             self.provider_metrics.add('copy.can_intra_copy', True)
             return await self.intra_copy(*args)
 
