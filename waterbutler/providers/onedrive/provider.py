@@ -72,6 +72,7 @@ class OneDriveProvider(provider.BaseProvider):
         self.token = self.credentials['token']
         self.folder = self.settings['folder']
         self.drive_id = self.settings['drive_id']
+        self.path = None
 
     # ========== properties ==========
 
@@ -99,7 +100,7 @@ class OneDriveProvider(provider.BaseProvider):
         """
         logger.debug('validate_v1_path self::{} path::{} kwargs::{}'.format(repr(self),
                                                                             path, kwargs))
-
+        self.path = path
         if path == '/':
             return OneDrivePath(path, _ids=[self.folder])
 
@@ -149,6 +150,7 @@ class OneDriveProvider(provider.BaseProvider):
         return od_path
 
     async def validate_path(self, path: str, **kwargs) -> OneDrivePath:
+        self.path = path
         logger.debug('validate_path self::{} path::{} kwargs::{}'.format(repr(self), path, kwargs))
 
         if path == '/':

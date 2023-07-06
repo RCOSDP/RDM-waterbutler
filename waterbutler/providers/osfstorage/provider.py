@@ -130,8 +130,13 @@ class OSFStorageProvider(provider.BaseProvider):
         If the creator of the project doesn't have enough quota, we invalidate the upload request.
         """
         resp = await self.make_signed_request(
-            'GET',
-            '{}/api/v1/project/{}/creator_quota/'.format(wb_settings.OSF_URL, self.nid),
+            'POST',
+            '{}/api/v1/project/{}/institution_storage_user_quota/'.format(wb_settings.OSF_URL, self.nid),
+            data=json.dumps({
+                'provider': 'osfstorage',
+                'path': self.root_id
+            }),
+            headers={'Content-Type': 'application/json'},
             expects=(200, )
         )
         body = await resp.json()

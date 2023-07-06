@@ -66,6 +66,8 @@ class DropboxProvider(provider.BaseProvider):
         self.token = self.credentials['token']
         self.folder = self.settings['folder']
         self.metrics.add('folder_is_root', self.folder == '/')
+        self.nid = self.settings['nid']
+        self.path = None
 
     async def dropbox_request(self,
                               url: str,
@@ -129,6 +131,7 @@ class DropboxProvider(provider.BaseProvider):
         raise pd_exceptions.DropboxUnhandledConflictError(str(data))
 
     async def validate_v1_path(self, path: str, **kwargs) -> WaterButlerPath:
+        self.path = path
         if path == '/':
             return WaterButlerPath(path, prepend=self.folder)
         implicit_folder = path.endswith('/')
@@ -143,6 +146,7 @@ class DropboxProvider(provider.BaseProvider):
         return WaterButlerPath(path, prepend=self.folder)
 
     async def validate_path(self, path: str, **kwargs) -> WaterButlerPath:
+        self.path = path
         return WaterButlerPath(path, prepend=self.folder)
 
     def can_duplicate_names(self) -> bool:

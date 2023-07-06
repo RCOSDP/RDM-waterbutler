@@ -86,8 +86,11 @@ class S3CompatB3Provider(provider.BaseProvider):
         self.bucket = self.connection.s3.Bucket(settings['bucket'])
         self.encrypt_uploads = self.settings.get('encrypt_uploads', False)
         self.prefix = settings.get('prefix', '')
+        self.path = None
+        self.nid = settings['nid']
 
     async def validate_v1_path(self, path, **kwargs):
+        self.path = path
         wbpath = WaterButlerPath(path, prepend=self.prefix)
         if path == '/':
             return wbpath
@@ -108,6 +111,7 @@ class S3CompatB3Provider(provider.BaseProvider):
         return wbpath
 
     async def validate_path(self, path, **kwargs):
+        self.path = path
         return WaterButlerPath(path, prepend=self.prefix)
 
     def can_duplicate_names(self):
