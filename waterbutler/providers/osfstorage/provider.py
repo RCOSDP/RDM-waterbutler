@@ -151,6 +151,7 @@ class OSFStorageProvider(provider.BaseProvider):
 
         :param dict settings: Overridden settings
         """
+        self.settings['storage'].update({'nid': self.nid})
         if not getattr(self, '_inner_provider', None):
             self._inner_provider = utils.make_provider(
                 self.provider_name,
