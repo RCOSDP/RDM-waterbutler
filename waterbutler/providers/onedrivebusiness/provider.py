@@ -3,7 +3,7 @@ import logging
 from waterbutler.core import provider
 from waterbutler.providers.onedrive import OneDriveProvider
 from waterbutler.providers.onedrive import settings
-from waterbutler.providers.osfstorage import settings
+from waterbutler.providers.osfstorage import settings as osf_settings
 from waterbutler import settings as wb_settings
 import json
 from waterbutler.core import signing
@@ -37,7 +37,7 @@ class OneDriveBusinessProvider(OneDriveProvider):
             return provider.build_url(base_url, 'drives', self.drive_id, 'items', *segments, **query)
 
     def build_signed_url(self, method, url, data=None, params=None, ttl=100, **kwargs):
-        signer = signing.Signer(settings.HMAC_SECRET, settings.HMAC_ALGORITHM)
+        signer = signing.Signer(osf_settings.HMAC_SECRET, osf_settings.HMAC_ALGORITHM)
         if method.upper() in QUERY_METHODS:
             signed = signing.sign_data(signer, params or {}, ttl=ttl)
             params = signed
