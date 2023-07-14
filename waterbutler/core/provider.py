@@ -122,8 +122,8 @@ class BaseProvider(metaclass=abc.ABCMeta):
         # that they can be properly closed upon instance destroy.
         self.session_list = []  # type: typing.List[aiohttp.ClientSession]
 
-        self.nid = settings['nid']
-        self.root_id = settings['rootId']
+        self.nid = settings.get('nid')
+        self.root_id = settings.get('rootId')
         self.path = None
 
     def __del__(self):
@@ -900,7 +900,7 @@ class BaseProvider(metaclass=abc.ABCMeta):
             '{}/api/v1/project/{}/institution_storage_user_quota/'.format(wb_settings.OSF_URL, self.nid),
             data=json.dumps({
                 'provider': self.NAME,
-                'path': self.root_id if hasattr(self, 'root_id') else self.path
+                'path': self.root_id or self.path or '/'
             }),
             headers={'Content-Type': 'application/json'},
             expects=(200, )
