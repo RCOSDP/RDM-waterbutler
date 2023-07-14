@@ -10,6 +10,7 @@ from waterbutler.core import remote_logging
 from waterbutler.server.auth import AuthHandler
 from waterbutler.core.utils import make_provider
 from waterbutler.constants import DEFAULT_CONFLICT
+from waterbutler.auth.osf.handler import EXPORT_DATA_FAKE_NODE_ID
 
 auth_handler = AuthHandler(settings.AUTH_HANDLERS)
 
@@ -79,6 +80,9 @@ class MoveCopyMixin:
                 raise exceptions.InvalidParameters('"rename" field is required for renaming')
             provider_action = 'move'
 
+        if self.resource == EXPORT_DATA_FAKE_NODE_ID:
+            self.location_id = self.get_query_argument('location_id', default=None)
+
         self.auth = await auth_handler.get(
             self.resource,
             provider,
@@ -87,6 +91,7 @@ class MoveCopyMixin:
             auth_type=AuthType.SOURCE,
             path=self.path,
             version=self.requested_version,
+            location_id=self.location_id,
         )
         self.provider = make_provider(
             provider,
@@ -118,6 +123,10 @@ class MoveCopyMixin:
 
             # Note: attached to self so that _send_hook has access to these
             self.dest_resource = self.json.get('resource', self.resource)
+
+            if self.dest_resource == EXPORT_DATA_FAKE_NODE_ID:
+                self.location_id = self.get_query_argument('location_id', default=None)
+
             self.dest_auth = await auth_handler.get(
                 self.dest_resource,
                 self.json.get('provider', self.provider.NAME),
@@ -125,6 +134,7 @@ class MoveCopyMixin:
                 action=auth_action,
                 auth_type=AuthType.DESTINATION,
                 path=path,
+                location_id=self.location_id,
             )
             self.dest_provider = make_provider(
                 self.json.get('provider', self.provider.NAME),
@@ -140,6 +150,7 @@ class MoveCopyMixin:
             result = await getattr(tasks, provider_action).adelay(
                 rename=self.json.get('rename'),
                 conflict=conflict,
+                version=self.requested_version,
                 request=remote_logging._serialize_request(self.request),
                 *self.build_args()
             )

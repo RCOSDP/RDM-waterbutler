@@ -3,6 +3,7 @@ from unittest import mock
 
 import pytest
 
+from waterbutler.auth.osf.handler import EXPORT_DATA_FAKE_NODE_ID
 from waterbutler.core.path import WaterButlerPath
 from waterbutler.server.api.v1.provider import list_or_value
 
@@ -41,6 +42,32 @@ class TestProviderHandler:
         handler.request.headers['Content-Length'] = 100
         await handler.prepare()
 
+        assert handler.auth == handler_auth
+        assert handler.provider == MockProvider()
+        assert handler.path == WaterButlerPath('/file', prepend=None)
+
+        # check that X-WATERBUTLER-REQUEST-ID is valid UUID
+        assert UUID(handler._headers['X-WATERBUTLER-REQUEST-ID'], version=4)
+
+    @pytest.mark.asyncio
+    async def test_prepare_with_query_arguments(
+            self, http_request, patch_auth_handler, patch_make_provider_core, handler_auth):
+        handler = mock_handler(http_request)
+        handler.request.method = 'PUT'
+        handler.request.headers['Content-Length'] = 100
+
+        # set case
+        handler.path_kwargs['resource'] = EXPORT_DATA_FAKE_NODE_ID
+        handler.request.query_arguments['revision'] = [b'1']
+        handler.request.query_arguments['callback_log'] = [b'False']
+        handler.request.query_arguments['location_id'] = [b'1']
+
+        await handler.prepare()
+
+        assert handler.requested_version == '1'
+        assert handler.callback_log is False
+        assert handler.resource == EXPORT_DATA_FAKE_NODE_ID
+        assert handler.location_id == '1'
         assert handler.auth == handler_auth
         assert handler.provider == MockProvider()
         assert handler.path == WaterButlerPath('/file', prepend=None)

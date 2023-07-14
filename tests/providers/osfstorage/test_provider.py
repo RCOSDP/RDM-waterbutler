@@ -988,7 +988,7 @@ class TestCrossRegionCopy:
         await src_provider.copy(dst_provider, src_path, dest_path, handle_naming=False);
 
         core_copy.assert_called_once_with(dst_provider, src_path, dest_path, rename=None,
-                                          conflict='replace', handle_naming=False);
+                                          conflict='replace', handle_naming=False, version=None);
         src_provider.download.assert_not_called()
 
     @pytest.mark.asyncio

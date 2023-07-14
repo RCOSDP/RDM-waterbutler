@@ -404,7 +404,7 @@ class BaseProvider(metaclass=abc.ABCMeta):
                    src_path: wb_path.WaterButlerPath,
                    dest_path: wb_path.WaterButlerPath,
                    rename: str=None, conflict: str='replace',
-                   handle_naming: bool=True) \
+                   handle_naming: bool=True, version=None) \
             -> typing.Tuple[wb_metadata.BaseMetadata, bool]:
         args = (dest_provider, src_path, dest_path)
         kwargs = {'rename': rename, 'conflict': conflict, 'handle_naming': handle_naming}
@@ -439,10 +439,13 @@ class BaseProvider(metaclass=abc.ABCMeta):
         if src_path.is_dir:
             return await self._folder_file_op(self.copy, *args, **kwargs)  # type: ignore
 
-        download_stream = await self.download(src_path)
+        download_stream = await self.download(src_path, version=version)
 
         if getattr(download_stream, 'name', None):
             dest_path.rename(download_stream.name)
+
+        if hasattr(download_stream, '_size') and download_stream._size is None:
+            download_stream._size = 0
 
         return await dest_provider.upload(download_stream, dest_path)
 

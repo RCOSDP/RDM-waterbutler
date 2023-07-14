@@ -79,6 +79,7 @@ class TestMoveOrCopy:
                                        celery_dest_copy_params,
                                        conflict='warn',
                                        rename=None,
+                                       version=None,
                                        request=serialized_request)
 
     @pytest.mark.asyncio
@@ -150,4 +151,5 @@ class TestMoveOrCopy:
                                        celery_dest_copy_params_root,
                                        conflict='warn',
                                        rename='renamed path',
+                                       version=None,
                                        request=serialized_request)

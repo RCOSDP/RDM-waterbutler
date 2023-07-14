@@ -415,7 +415,8 @@ class OSFStorageProvider(provider.BaseProvider):
                    dest_path: WaterButlerPath,
                    rename: str=None,
                    conflict: str='replace',
-                   handle_naming: bool=True) -> typing.Tuple[BaseMetadata, bool]:
+                   handle_naming: bool=True,
+                   version=None) -> typing.Tuple[BaseMetadata, bool]:
         """Override parent's copy to support cross-region osfstorage copies. Delegates to
         :meth:`.BaseProvider.copy` when destination is not osfstorage. If both providers are in the
         same region (i.e. `.can_intra_copy` is true), call `.intra_copy`. Otherwise, grab a
@@ -429,7 +430,7 @@ class OSFStorageProvider(provider.BaseProvider):
         # when moving to non-osfstorage, default move is fine
         if dest_provider.NAME != 'osfstorage':
             return await super().copy(dest_provider, src_path, dest_path, rename=rename,
-                                      conflict=conflict, handle_naming=handle_naming)
+                                      conflict=conflict, handle_naming=handle_naming, version=version)
 
         args = (dest_provider, src_path, dest_path)
         kwargs = {'rename': rename, 'conflict': conflict}
@@ -576,7 +577,7 @@ class OSFStorageProvider(provider.BaseProvider):
 
         try:
             metadata = await provider.metadata(remote_complete_path)
-        except exceptions.MetadataError as e:
+        except (exceptions.MetadataError, exceptions.NotFoundError) as e:
             if e.code != 404:
                 raise
             metadata, _ = await provider.move(provider, remote_pending_path, remote_complete_path)
