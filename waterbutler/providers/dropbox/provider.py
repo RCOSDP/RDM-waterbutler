@@ -66,8 +66,6 @@ class DropboxProvider(provider.BaseProvider):
         self.token = self.credentials['token']
         self.folder = self.settings['folder']
         self.metrics.add('folder_is_root', self.folder == '/')
-        self.nid = self.settings['nid']
-        self.path = None
 
     async def dropbox_request(self,
                               url: str,

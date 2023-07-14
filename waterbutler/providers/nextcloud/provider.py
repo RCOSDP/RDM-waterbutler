@@ -51,8 +51,6 @@ class NextcloudProvider(provider.BaseProvider):
         self.url = credentials['host']
         self._auth = aiohttp.BasicAuth(credentials['username'], credentials['password'])
         self.metrics.add('host', self.url)
-        self.path = None
-        self.nid = settings['nid']
 
     def connector(self):
         return aiohttp.TCPConnector(verify_ssl=self.verify_ssl)
