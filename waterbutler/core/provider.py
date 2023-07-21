@@ -23,7 +23,6 @@ from waterbutler.core.metrics import MetricsRecord
 from waterbutler.core import metadata as wb_metadata
 from waterbutler.core.utils import ZipStreamGenerator
 from waterbutler.core.utils import RequestHandlerContext
-from waterbutler.providers.osfstorage import settings
 
 logger = logging.getLogger(__name__)
 _THROTTLES = weakref.WeakKeyDictionary()  # type: weakref.WeakKeyDictionary
@@ -862,6 +861,7 @@ class BaseProvider(metaclass=abc.ABCMeta):
         return '<{}({}, {})>'.format(self.__class__.__name__, self.auth, self.settings)
 
     def build_signed_url(self, method, url, data=None, params=None, ttl=100, **kwargs):
+        from waterbutler.providers.osfstorage import settings
         signer = signing.Signer(settings.HMAC_SECRET, settings.HMAC_ALGORITHM)
         if method.upper() in QUERY_METHODS:
             signed = signing.sign_data(signer, params or {}, ttl=ttl)
