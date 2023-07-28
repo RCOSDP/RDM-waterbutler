@@ -89,6 +89,11 @@ class MetadataMixin:
         if isinstance(stream, str):
             return self.redirect(stream)
 
+        is_chunked = False
+        if isinstance(stream, ResponseStreamReader):
+            # is_compression = 'gzip' not in stream.response.headers.get('Content-Encoding', '')
+            is_chunked = 'chunked' not in stream.response.headers.get('Transfer-Encoding', '')
+
         if getattr(stream, 'partial', None):
             # Use getattr here as not all stream may have a partial attribute
             # Plus it fixes tests
@@ -99,7 +104,9 @@ class MetadataMixin:
             self.set_header('Content-Type', stream.content_type)
 
         logger.debug('stream size is: {}'.format(stream.size))
-        if stream.size is not None:
+        # In chunked transfer encoding, the data stream is divided into a series of non-overlapping "chunks".
+        # The Content-Length header can be omitted in this case
+        if not is_chunked and stream.size is not None:
             self.set_header('Content-Length', str(stream.size))
 
         # Build `Content-Disposition` header from `displayName` override,
@@ -118,6 +125,10 @@ class MetadataMixin:
             self.set_header('Content-Type', mime_types[ext])
 
         await self.write_stream(stream)
+
+        # update response headers by the original size after decompressing
+        if is_chunked and self.bytes_downloaded is not None:
+            self.set_header('Content-Length', str(self.bytes_downloaded))
 
         if getattr(stream, 'partial', False) and isinstance(stream, ResponseStreamReader):
             await stream.response.release()
