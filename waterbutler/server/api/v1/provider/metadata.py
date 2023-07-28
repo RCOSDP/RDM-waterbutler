@@ -89,10 +89,10 @@ class MetadataMixin:
         if isinstance(stream, str):
             return self.redirect(stream)
 
-        is_chunked = False
+        is_compression = is_chunked = False
         if isinstance(stream, ResponseStreamReader):
-            # is_compression = 'gzip' not in stream.response.headers.get('Content-Encoding', '')
-            is_chunked = 'chunked' not in stream.response.headers.get('Transfer-Encoding', '')
+            is_compression = 'gzip' in stream.response.headers.get('Content-Encoding', '')
+            is_chunked = 'chunked' in stream.response.headers.get('Transfer-Encoding', '')
 
         if getattr(stream, 'partial', None):
             # Use getattr here as not all stream may have a partial attribute
@@ -104,9 +104,12 @@ class MetadataMixin:
             self.set_header('Content-Type', stream.content_type)
 
         logger.debug('stream size is: {}'.format(stream.size))
-        # In chunked transfer encoding, the data stream is divided into a series of non-overlapping "chunks".
+        # - In chunked transfer encoding, the data stream is divided into a series of non-overlapping "chunks".
         # The Content-Length header can be omitted in this case
-        if not is_chunked and stream.size is not None:
+        # - Another case, If the Content-Encoding header is `gzip`,
+        # the Content-Length is equal to the length of the body after the Content-Encoding.
+        # We need adjust it after loading the entire body
+        if not (is_chunked or is_compression) and stream.size is not None:
             self.set_header('Content-Length', str(stream.size))
 
         # Build `Content-Disposition` header from `displayName` override,
@@ -119,7 +122,7 @@ class MetadataMixin:
         self.set_header('Content-Disposition', make_disposition(name))
 
         _, ext = os.path.splitext(name)
-        # If the file extention is in mime_types
+        # If the file extension is in mime_types
         # override the content type to fix issues with safari shoving in new file extensions
         if ext in mime_types:
             self.set_header('Content-Type', mime_types[ext])
@@ -127,7 +130,7 @@ class MetadataMixin:
         await self.write_stream(stream)
 
         # update response headers by the original size after decompressing
-        if is_chunked and self.bytes_downloaded is not None:
+        if (is_chunked or is_compression) and self.bytes_downloaded is not None:
             self.set_header('Content-Length', str(self.bytes_downloaded))
 
         if getattr(stream, 'partial', False) and isinstance(stream, ResponseStreamReader):
