@@ -16,6 +16,7 @@ from boto.utils import compute_md5
 
 from waterbutler.core import streams, metadata, exceptions
 from waterbutler.core.path import WaterButlerPath
+from waterbutler.core.utils import make_disposition
 from waterbutler.providers.s3compat import S3CompatProvider
 from waterbutler.providers.s3compat import settings as pd_settings
 
@@ -732,9 +733,10 @@ class TestCRUD:
     @pytest.mark.aiohttpretty
     async def test_download(self, provider, mock_time):
         path = WaterButlerPath('/muhtriangle', prepend=provider.prefix)
-        response_headers = {'response-content-disposition': 'attachment'}
+        response_headers = {'response-content-disposition': make_disposition(path.name)}
         url = provider.bucket.new_key(path.full_path).generate_url(100, response_headers=response_headers)
-        aiohttpretty.register_uri('GET', url[:url.index('?')], body=b'delicious', auto_length=True)
+        url = url if provider.NAME == 's3compatinstitutions' else url[:url.index('?')]
+        aiohttpretty.register_uri('GET', url, body=b'delicious', auto_length=True)
 
         result = await provider.download(path)
         content = await result.read()
@@ -745,15 +747,16 @@ class TestCRUD:
     @pytest.mark.aiohttpretty
     async def test_download_range(self, provider, mock_time):
         path = WaterButlerPath('/muhtriangle', prepend=provider.prefix)
-        response_headers = {'response-content-disposition': 'attachment;'}
+        response_headers = {'response-content-disposition': make_disposition(path.name)}
         url = provider.bucket.new_key(path.full_path).generate_url(100, response_headers=response_headers)
-        aiohttpretty.register_uri('GET', url[:url.index('?')], body=b'de', auto_length=True, status=206)
+        url = url if provider.NAME == 's3compatinstitutions' else url[:url.index('?')]
+        aiohttpretty.register_uri('GET', url, body=b'de', auto_length=True, status=206)
 
         result = await provider.download(path, range=(0, 1))
         assert result.partial
         content = await result.read()
         assert content == b'de'
-        assert aiohttpretty.has_call(method='GET', uri=url[:url.index('?')])
+        assert aiohttpretty.has_call(method='GET', uri=url)
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
@@ -762,11 +765,12 @@ class TestCRUD:
         url = provider.bucket.new_key(path.full_path).generate_url(
             100,
             query_parameters={'versionId': 'someversion'},
-            response_headers={'response-content-disposition': 'attachment'},
+            response_headers={'response-content-disposition': make_disposition(path.name)},
         )
-        aiohttpretty.register_uri('GET', url[:url.index('?')], body=b'delicious', auto_length=True)
+        url = url if provider.NAME == 's3compatinstitutions' else url[:url.index('?')]
+        aiohttpretty.register_uri('GET', url, body=b'delicious', auto_length=True)
 
-        result = await provider.download(path, version='someversion')
+        result = await provider.download(path, revision='someversion')
         content = await result.read()
 
         assert content == b'delicious'
@@ -781,11 +785,11 @@ class TestCRUD:
     async def test_download_with_display_name(self, provider, mock_time, display_name_arg, expected_name):
         path = WaterButlerPath('/muhtriangle', prepend=provider.prefix)
         response_headers = {
-            'response-content-disposition':
-            'attachment; filename="{}"; filename*=UTF-8''{}'.format(expected_name, expected_name)
+            'response-content-disposition': make_disposition(expected_name)
         }
         url = provider.bucket.new_key(path.full_path).generate_url(100, response_headers=response_headers)
-        aiohttpretty.register_uri('GET', url[:url.index('?')], body=b'delicious', auto_length=True)
+        url = url if provider.NAME == 's3compatinstitutions' else url[:url.index('?')]
+        aiohttpretty.register_uri('GET', url, body=b'delicious', auto_length=True)
 
         result = await provider.download(path, display_name=display_name_arg)
         content = await result.read()
@@ -796,9 +800,10 @@ class TestCRUD:
     @pytest.mark.aiohttpretty
     async def test_download_not_found(self, provider, mock_time):
         path = WaterButlerPath('/muhtriangle', prepend=provider.prefix)
-        response_headers = {'response-content-disposition': 'attachment'}
+        response_headers = {'response-content-disposition': make_disposition(path.name)}
         url = provider.bucket.new_key(path.full_path).generate_url(100, response_headers=response_headers)
-        aiohttpretty.register_uri('GET', url[:url.index('?')], status=404)
+        url = url if provider.NAME == 's3compatinstitutions' else url[:url.index('?')]
+        aiohttpretty.register_uri('GET', url, status=404)
 
         with pytest.raises(exceptions.DownloadError):
             await provider.download(path)

@@ -287,7 +287,8 @@ class BaseProvider(metaclass=abc.ABCMeta):
         while retry >= 0:
             # Don't overwrite the callable ``url`` so that signed URLs are refreshed for every retry
             non_callable_url = url() if callable(url) else url
-            non_callable_url = URL(non_callable_url, encoded=True)
+            if self.NAME != 'nextcloudinstitutions':
+                non_callable_url = URL(non_callable_url, encoded=True)
             try:
                 self.provider_metrics.incr('requests.count')
                 # TODO: use a `dict` to select methods with either `lambda` or `functools.partial`
@@ -439,7 +440,7 @@ class BaseProvider(metaclass=abc.ABCMeta):
         if src_path.is_dir:
             return await self._folder_file_op(self.copy, *args, **kwargs)  # type: ignore
 
-        download_stream = await self.download(src_path, version=version)
+        download_stream = await self.download(src_path, version=version, revision=version)
 
         if getattr(download_stream, 'name', None):
             dest_path.rename(download_stream.name)

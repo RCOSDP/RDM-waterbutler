@@ -6,6 +6,7 @@ import xmltodict
 
 import boto3
 from botocore.exceptions import ClientError
+from urllib.parse import unquote
 # from boto3 import exception
 
 from waterbutler.core import streams
@@ -296,7 +297,7 @@ class S3CompatB3Provider(provider.BaseProvider):
         except exceptions.MetadataError as e:
             # MinIO may not support "versions" from generate_url() of boto2.
             # (And, MinIO does not support ListObjectVersions yet.)
-            logger.info('ListObjectVersions may not be supported: url={}: {}'.format(url(), str(e)))
+            logger.info('ListObjectVersions may not be supported: url={}: {}'.format(url, str(e)))
             return []
 
         content = await resp.read()
@@ -309,7 +310,7 @@ class S3CompatB3Provider(provider.BaseProvider):
         return [
             S3CompatB3Revision(item)
             for item in versions
-            if item['Key'] == prefix
+            if unquote(item['Key']) == prefix  # Fix oraclecloud.com return encoded 'Key' value ('/' -> '%2F')
         ]
 
     async def metadata(self, path, revision=None, **kwargs):
@@ -337,10 +338,12 @@ class S3CompatB3Provider(provider.BaseProvider):
         return S3CompatB3FolderMetadata(self, {'Prefix': path.full_path})
 
     async def _metadata_file(self, path, revision=None):
-        if revision is None or revision == 'Latest':
-            revision = 'null'
         try:
-            resp = self.connection.s3.meta.client.head_object(Bucket=self.bucket.name, Key=path.full_path)
+            # Fix OCI for Institutions: get metadata of previous file version
+            if not revision or revision == 'Latest':
+                resp = self.connection.s3.meta.client.head_object(Bucket=self.bucket.name, Key=path.full_path)
+            else:
+                resp = self.connection.s3.meta.client.head_object(Bucket=self.bucket.name, Key=path.full_path, VersionId=revision)
         except ClientError as e:
             raise exceptions.MetadataError(str(path.full_path), code=int(e.response['Error']['Code']))
 
