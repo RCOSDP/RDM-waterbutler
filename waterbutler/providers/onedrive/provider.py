@@ -328,20 +328,17 @@ class OneDriveProvider(provider.BaseProvider):
             items = await self._revisions_json(path)
             for index, item in enumerate(items['value']):
                 if item['id'] == revision:
-                    try:
-                        if index == 0:
-                            # Latest version: same as download file without revision param
-                            metadata = await self.metadata(path)
-                            logger.debug('download metadata::{}'.format(json.dumps(metadata.raw)))
-                            if metadata.package_type == 'oneNote':
-                                raise exceptions.UnexportableFileTypeError(str(path))
-                            download_url = metadata.download_url
-                        else:
-                            # Previous version: download file via API /drives/{drive-id}/items/{item-id}/versions/{version-id}/content
-                            path_segments = (*path.api_identifier, 'versions', revision, 'content')
-                            download_url = self._build_drive_url(*path_segments)
-                    except KeyError:
-                        raise exceptions.UnexportableFileTypeError(str(path))
+                    if index == 0:
+                        # Latest version: same as download file without revision param
+                        metadata = await self.metadata(path)
+                        logger.debug('download metadata::{}'.format(json.dumps(metadata.raw)))
+                        if metadata.package_type == 'oneNote':
+                            raise exceptions.UnexportableFileTypeError(str(path))
+                        download_url = metadata.download_url
+                    else:
+                        # Previous version: download file via API /drives/{drive-id}/items/{item-id}/versions/{version-id}/content
+                        path_segments = (*path.api_identifier, 'versions', revision, 'content')
+                        download_url = self._build_drive_url(*path_segments)
                     break
         else:
             metadata = await self.metadata(path, revision=revision)

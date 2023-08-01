@@ -4,6 +4,7 @@ from waterbutler.providers.dropbox import DropboxProvider
 from waterbutler.core import provider
 from waterbutler.core.path import WaterButlerPath
 
+
 class DropboxBusinessProvider(DropboxProvider):
 
     NAME = 'dropboxbusiness'
