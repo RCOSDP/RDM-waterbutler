@@ -139,7 +139,13 @@ class OneDriveProvider(provider.BaseProvider):
                 self.dont_escape_these
             )
 
-            if not data['parentReference']['path'].startswith(base_full_path):
+            # Ensure data['parentReference']['path'] is quoted to correctly compare with base_full_path
+            data_full_path = urlparse.quote(
+                urlparse.unquote(data['parentReference']['path']),
+                self.dont_escape_these
+            )
+
+            if not data_full_path.startswith(base_full_path):
                 # the requested file is NOT a child of self.folder
                 raise exceptions.NotFoundError(path)
 
@@ -185,7 +191,13 @@ class OneDriveProvider(provider.BaseProvider):
                 self.dont_escape_these
             )
 
-            if not data['parentReference']['path'].startswith(base_full_path):
+            # Ensure data['parentReference']['path'] is quoted to correctly compare with base_full_path
+            data_full_path = urlparse.quote(
+                urlparse.unquote(data['parentReference']['path']),
+                self.dont_escape_these
+            )
+
+            if not data_full_path.startswith(base_full_path):
                 # the requested file is NOT a child of self.folder
                 raise exceptions.NotFoundError(path)  # TESTME
 

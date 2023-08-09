@@ -149,7 +149,7 @@ class MoveCopyMixin:
             conflict = self.json.get('conflict', DEFAULT_CONFLICT)
             task_kwargs = {}
             if provider_action == 'copy':
-                # Fix move file API getting error
+                # Only copy API get additional 'version' argument
                 task_kwargs = {'version': self.requested_version}
             result = await getattr(tasks, provider_action).adelay(
                 rename=self.json.get('rename'),
