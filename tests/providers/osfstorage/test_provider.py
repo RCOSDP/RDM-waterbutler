@@ -704,9 +704,16 @@ class TestUploads:
         inner_provider.metadata = utils.MockCoroutine(return_value=utils.MockFileMetadata())
 
         url, _, params = provider.build_signed_url(
-            'GET', '{}/api/v1/project/foo/creator_quota/'.format(wb_settings.OSF_URL))
+            'POST',
+            '{}/api/v1/project/{}/institution_storage_user_quota/'.format(wb_settings.OSF_URL, provider.nid),
+            data=json.dumps({
+                'provider': provider.NAME,
+                'path': provider.root_id or provider.path or '/'
+            }),
+            headers={'Content-Type': 'application/json'}
+        )
         quota = {'max': 10000, 'used': 0}
-        aiohttpretty.register_json_uri('GET', url, body=quota, params=params)
+        aiohttpretty.register_json_uri('POST', url, body=quota, params=params)
 
         res, created = await provider.upload(file_stream, upload_path)
 
@@ -732,9 +739,16 @@ class TestUploads:
         provider, inner_provider = provider_and_mock_one
 
         url, _, params = provider.build_signed_url(
-            'GET', '{}/api/v1/project/foo/creator_quota/'.format(wb_settings.OSF_URL))
+            'POST',
+            '{}/api/v1/project/{}/institution_storage_user_quota/'.format(wb_settings.OSF_URL, provider.nid),
+            data=json.dumps({
+                'provider': provider.NAME,
+                'path': provider.root_id or provider.path or '/'
+            }),
+            headers={'Content-Type': 'application/json'}
+        )
         quota = {'max': 10000, 'used': 0}
-        aiohttpretty.register_json_uri('GET', url, body=quota, params=params)
+        aiohttpretty.register_json_uri('POST', url, body=quota, params=params)
 
         url = 'https://waterbutler.io/{}/children/'.format(upload_path.parent.identifier)
 
@@ -771,9 +785,16 @@ class TestUploads:
         provider, inner_provider = provider_and_mock_one
 
         url, _, params = provider.build_signed_url(
-            'GET', '{}/api/v1/project/foo/creator_quota/'.format(wb_settings.OSF_URL))
+            'POST',
+            '{}/api/v1/project/{}/institution_storage_user_quota/'.format(wb_settings.OSF_URL, provider.nid),
+            data=json.dumps({
+                'provider': provider.NAME,
+                'path': provider.root_id or provider.path or '/'
+            }),
+            headers={'Content-Type': 'application/json'}
+        )
         quota = {'max': 10000, 'used': 0}
-        aiohttpretty.register_json_uri('GET', url, body=quota, params=params)
+        aiohttpretty.register_json_uri('POST', url, body=quota, params=params)
 
         url = 'https://waterbutler.io/{}/children/'.format(upload_path.parent.identifier)
 
@@ -791,9 +812,16 @@ class TestUploads:
         provider, inner_provider = provider_and_mock_one
 
         url, _, params = provider.build_signed_url(
-            'GET', '{}/api/v1/project/foo/creator_quota/'.format(wb_settings.OSF_URL))
+            'POST',
+            '{}/api/v1/project/{}/institution_storage_user_quota/'.format(wb_settings.OSF_URL, provider.nid),
+            data=json.dumps({
+                'provider': provider.NAME,
+                'path': provider.root_id or provider.path or '/'
+            }),
+            headers={'Content-Type': 'application/json'}
+        )
         quota = {'max': 10000, 'used': 0}
-        aiohttpretty.register_json_uri('GET', url, body=quota, params=params)
+        aiohttpretty.register_json_uri('POST', url, body=quota, params=params)
 
         path = WaterButlerPath('/{}'.format(upload_response['data']['name']),
                                _ids=('Test', upload_response['data']['id']))
@@ -1036,9 +1064,16 @@ class TestQuota:
         inner_provider.metadata = utils.MockCoroutine(return_value=utils.MockFileMetadata())
 
         url, _, params = provider.build_signed_url(
-            'GET', '{}/api/v1/project/foo/creator_quota/'.format(wb_settings.OSF_URL))
+            'POST',
+            '{}/api/v1/project/{}/institution_storage_user_quota/'.format(wb_settings.OSF_URL, provider.nid),
+            data=json.dumps({
+                'provider': provider.NAME,
+                'path': provider.root_id or provider.path or '/'
+            }),
+            headers={'Content-Type': 'application/json'}
+        )
         quota = {'max': 10000, 'used': 5000}
-        aiohttpretty.register_json_uri('GET', url, body=quota, params=params)
+        aiohttpretty.register_json_uri('POST', url, body=quota, params=params)
 
         quota = await provider.get_quota()
 
