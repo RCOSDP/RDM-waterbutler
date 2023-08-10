@@ -6,7 +6,7 @@ import xmltodict
 
 import boto3
 from botocore.exceptions import ClientError
-from urllib.parse import unquote
+from urllib.parse import unquote_plus
 # from boto3 import exception
 
 from waterbutler.core import streams
@@ -310,7 +310,7 @@ class S3CompatB3Provider(provider.BaseProvider):
         return [
             S3CompatB3Revision(item)
             for item in versions
-            if unquote(item['Key']) == prefix  # Fix oraclecloud.com return encoded 'Key' value ('/' -> '%2F')
+            if unquote_plus(item['Key']) == prefix  # Fix oraclecloud.com return special encoded 'Key' value ('/' -> '%2F', ' ' -> '+' instead of '%20')
         ]
 
     async def metadata(self, path, revision=None, **kwargs):
