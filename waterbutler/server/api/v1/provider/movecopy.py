@@ -147,12 +147,16 @@ class MoveCopyMixin:
         if not getattr(self.provider, 'can_intra_' + provider_action)(self.dest_provider, self.path):
             # this weird signature syntax courtesy of py3.4 not liking trailing commas on kwargs
             conflict = self.json.get('conflict', DEFAULT_CONFLICT)
+            task_kwargs = {}
+            if provider_action == 'copy':
+                # Only copy API has additional 'version' argument
+                task_kwargs = {'version': self.requested_version}
             result = await getattr(tasks, provider_action).adelay(
                 rename=self.json.get('rename'),
                 conflict=conflict,
-                version=self.requested_version,
                 request=remote_logging._serialize_request(self.request),
-                *self.build_args()
+                *self.build_args(),
+                **task_kwargs,
             )
             metadata, created = await tasks.wait_on_celery(result)
         else:
