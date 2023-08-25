@@ -1,6 +1,7 @@
 import json
 import time
 import asyncio
+import inspect  # noqa
 import logging
 
 import furl
@@ -8,6 +9,7 @@ import aiohttp
 
 from waterbutler import settings
 from waterbutler.core import utils
+from waterbutler.utils import inspect_info  # noqa
 from waterbutler.sizes import KBs, MBs, GBs
 from waterbutler.version import __version__
 from waterbutler.tasks import settings as task_settings
@@ -45,7 +47,7 @@ async def log_to_callback(action, source=None, destination=None, start_time=None
             ref_url_domain = '{}://{}{}'.format(ref_url.scheme, ref_url.host, ref_url_port)
 
     if start_time:
-        log_payload['email'] = time.time() - start_time > task_settings.WAIT_TIMEOUT
+        log_payload['email'] = time.time() - start_time > task_settings.EMAIL_WAIT_TIMEOUT
 
     if action in ('move', 'copy'):
         log_payload['source'] = source.serialize()
@@ -59,6 +61,8 @@ async def log_to_callback(action, source=None, destination=None, start_time=None
                          settings.MFR_IDENTIFYING_HEADER in request['request']['headers'])
         log_payload['action_meta']['is_mfr_render'] = is_mfr_render
 
+    if not auth['callback_url']:
+        return None
     resp_status, resp_data = await utils.send_signed_request('PUT', auth['callback_url'], log_payload)
 
     if resp_status // 100 != 2:

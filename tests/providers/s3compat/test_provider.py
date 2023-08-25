@@ -1753,8 +1753,8 @@ class TestOperations:
         assert aiohttpretty.has_call(method='GET', uri=url, params=params)
 
     async def test_equality(self, provider, mock_time):
-        assert provider.can_intra_copy(provider)
-        assert provider.can_intra_move(provider)
+        assert not provider.can_intra_copy(provider)
+        assert not provider.can_intra_move(provider)
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
@@ -1786,8 +1786,8 @@ class TestOperations:
         file_path = WaterButlerPath('/my-image.jpg', prepend=provider.prefix)
         folder_path = WaterButlerPath('/folder/', folder=True, prepend=provider.prefix)
 
-        assert provider.can_intra_move(provider)
-        assert provider.can_intra_move(provider, file_path)
+        assert not provider.can_intra_move(provider)
+        assert not provider.can_intra_move(provider, file_path)
         assert not provider.can_intra_move(provider, folder_path)
 
     def test_can_intra_copy(self, provider):
@@ -1795,8 +1795,8 @@ class TestOperations:
         file_path = WaterButlerPath('/my-image.jpg', prepend=provider.prefix)
         folder_path = WaterButlerPath('/folder/', folder=True, prepend=provider.prefix)
 
-        assert provider.can_intra_copy(provider)
-        assert provider.can_intra_copy(provider, file_path)
+        assert not provider.can_intra_copy(provider)
+        assert not provider.can_intra_copy(provider, file_path)
         assert not provider.can_intra_copy(provider, folder_path)
 
     def test_can_duplicate_names(self, provider):

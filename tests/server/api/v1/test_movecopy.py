@@ -75,11 +75,15 @@ class TestMoveOrCopy:
                                               handler.auth['settings'])
         handler.write.assert_called_with(serialized_metadata)
         assert handler.dest_meta == mock_file_metadata
+        kwargs = {}
+        if action == 'copy':
+            kwargs = {'version': None}
         mock_celery.assert_called_with(celery_src_copy_params,
                                        celery_dest_copy_params,
                                        conflict='warn',
                                        rename=None,
-                                       request=serialized_request)
+                                       request=serialized_request,
+                                       **kwargs)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize('action', ['move', 'copy'])

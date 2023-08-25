@@ -1,6 +1,7 @@
 import uuid
 import socket
 import asyncio
+import inspect  # noqa
 import logging
 from http import HTTPStatus
 
@@ -10,12 +11,14 @@ import sentry_sdk
 
 from waterbutler.core import utils
 from waterbutler.server import settings
+from waterbutler.utils import inspect_info  # noqa
 from waterbutler.server.api.v1 import core
 from waterbutler.core import remote_logging
 from waterbutler.server.auth import AuthHandler
 from waterbutler.core.log_payload import LogPayload
 from waterbutler.core.streams import RequestStreamReader
 from waterbutler.server.api.v1.provider.create import CreateMixin
+from waterbutler.auth.osf.handler import EXPORT_DATA_FAKE_NODE_ID
 from waterbutler.server.api.v1.provider.metadata import MetadataMixin
 from waterbutler.server.api.v1.provider.movecopy import MoveCopyMixin
 
@@ -37,6 +40,8 @@ class ProviderHandler(core.BaseHandler, CreateMixin, MetadataMixin, MoveCopyMixi
     PRE_VALIDATORS = {'put': 'prevalidate_put', 'post': 'prevalidate_post'}
     POST_VALIDATORS = {'put': 'postvalidate_put'}
     PATTERN = r'/resources/(?P<resource>(?:\w|\d)+)/providers/(?P<provider>(?:\w|\d)+)(?P<path>/.*/?)'
+    location_id = None
+    callback_log = True
 
     async def prepare(self, *args, **kwargs):
         method = self.request.method.lower()
@@ -60,6 +65,12 @@ class ProviderHandler(core.BaseHandler, CreateMixin, MetadataMixin, MoveCopyMixi
         provider = self.path_kwargs['provider']
         self.resource = self.path_kwargs['resource']
 
+        callback_log = self.get_query_argument('callback_log', default='True')
+        # as default callback_log is True
+        self.callback_log = False if isinstance(callback_log, str) and callback_log.lower() == 'false' else True
+        if self.resource == EXPORT_DATA_FAKE_NODE_ID:
+            self.location_id = self.get_query_argument('location_id', default=None)
+
         with sentry_sdk.configure_scope() as scope:
             scope.set_tag('resource.id', self.resource)
             scope.set_tag('src_provider', self.path_kwargs['provider'])
@@ -75,10 +86,14 @@ class ProviderHandler(core.BaseHandler, CreateMixin, MetadataMixin, MoveCopyMixi
         # Delay setup of the provider when method is post, as we need to evaluate the json body
         # action.
         if method != 'post':
-            self.auth = await auth_handler.get(self.resource, provider, self.request,
-                                               path=self.path, version=self.requested_version)
-            self.provider = utils.make_provider(provider, self.auth['auth'],
-                                                self.auth['credentials'], self.auth['settings'])
+            self.auth = await auth_handler.get(
+                self.resource, provider, self.request,
+                path=self.path, version=self.requested_version,
+                callback_log=self.callback_log,
+                location_id=self.location_id)
+            self.provider = utils.make_provider(
+                provider, self.auth['auth'],
+                self.auth['credentials'], self.auth['settings'])
             self.path = await self.provider.validate_v1_path(self.path, **self.arguments)
 
         self.target_path = None
