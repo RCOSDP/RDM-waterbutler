@@ -1,6 +1,7 @@
 import pytest
 
 from waterbutler.core import exceptions
+from waterbutler.core.path import WaterButlerPath
 
 from tests.server.api.v1.utils import mock_handler
 from tests.server.api.v1.fixtures import (http_request, move_copy_args, handler_auth,
@@ -8,7 +9,7 @@ from tests.server.api.v1.fixtures import (http_request, move_copy_args, handler_
                                           serialized_metadata, celery_src_copy_params,
                                           celery_dest_copy_params, celery_dest_copy_params_root,
                                           mock_intra, mock_inter, patch_make_provider_move_copy,
-                                          mock_file_metadata)
+                                          mock_file_metadata, celery_dest_copy_params_location)
 
 
 @pytest.mark.usefixtures('patch_auth_handler', 'patch_make_provider_move_copy')
@@ -107,6 +108,39 @@ class TestMoveOrCopy:
                                        rename=None)
         handler.write.assert_called_with(serialized_metadata)
         assert handler.dest_meta == mock_file_metadata
+
+    @pytest.mark.asyncio
+    async def test_location_copy(self, http_request, mock_inter, mock_file_metadata,
+                                 serialized_metadata, celery_src_copy_params,
+                                 celery_dest_copy_params_location, serialized_request):
+        http_request.query_arguments = {'location_id': '1'}
+        serialized_metadata['data']['attributes']['resource'] = 'export_location'
+        serialized_metadata['data']['links'] = {
+            'download': 'http://localhost:7777/v1/resources/export_location/providers/MockProvider/Foo.name',
+            'delete': 'http://localhost:7777/v1/resources/export_location/providers/MockProvider/Foo.name',
+            'upload': 'http://localhost:7777/v1/resources/export_location/providers/MockProvider/Foo.name?kind=file',
+            'move': 'http://localhost:7777/v1/resources/export_location/providers/MockProvider/Foo.name'
+        }
+        handler = mock_handler(http_request)
+        mock_make_provider, mock_celery = mock_inter
+        handler.dest_resource = 'export_location'
+        handler._json = {'action': 'copy', 'path': '/test_path/', 'resource': 'export_location', 'provider': 'MockProvider'}
+
+        await handler.move_or_copy()
+
+        mock_make_provider.assert_called_with('MockProvider',
+                                              handler.auth['auth'],
+                                              handler.auth['credentials'],
+                                              handler.auth['settings'])
+        handler.write.assert_called_with(serialized_metadata)
+        assert handler.dest_meta == mock_file_metadata
+        kwargs = {'version': None}
+        mock_celery.assert_called_with(celery_src_copy_params,
+                                       celery_dest_copy_params_location,
+                                       conflict='warn',
+                                       rename=None,
+                                       request=serialized_request,
+                                       **kwargs)
 
     @pytest.mark.asyncio
     async def test_invalid_rename(self, http_request):
