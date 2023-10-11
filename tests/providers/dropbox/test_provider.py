@@ -1048,16 +1048,10 @@ class TestIntraMoveCopy:
 class TestOperations:
 
     def test_can_intra_copy(self, provider):
-        if provider.NAME == 'dropboxbusiness':
-            assert not provider.can_intra_copy(provider)
-        else:
-            assert provider.can_intra_copy(provider)
+        assert provider.can_intra_copy(provider)
 
     def test_can_intra_copy_other(self, provider, other_provider):
-        if provider.NAME == 'dropboxbusiness':
-            assert not provider.can_intra_copy(other_provider)
-        else:
-            assert provider.can_intra_copy(other_provider)
+        assert provider.can_intra_copy(other_provider)
 
     def test_can_intra_move(self, provider):
         assert provider.can_intra_move(provider)

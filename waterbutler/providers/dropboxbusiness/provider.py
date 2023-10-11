@@ -1,8 +1,6 @@
 import json
 
 from waterbutler.providers.dropbox import DropboxProvider
-from waterbutler.core import provider
-from waterbutler.core.path import WaterButlerPath
 
 
 class DropboxBusinessProvider(DropboxProvider):
@@ -23,8 +21,3 @@ class DropboxBusinessProvider(DropboxProvider):
                 'namespace_id': self.team_folder_id,
             })
         })
-
-    def can_intra_copy(self, dest_provider: provider.BaseProvider,
-                       path: WaterButlerPath=None) -> bool:
-        # Remove intra copy for Dropbox Business
-        return False
