@@ -75,8 +75,7 @@ def src_bundle(src_path):
             },
             'settings': {},
             'credentials': {},
-        },
-        'root_path':'123456789',
+        }
     }
 
 
@@ -92,8 +91,7 @@ def dest_bundle(dest_path):
             },
             'settings': {},
             'credentials': {},
-        },
-        'root_path':'123456789',
+        }
     }
 
 

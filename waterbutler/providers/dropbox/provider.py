@@ -60,6 +60,7 @@ class DropboxProvider(provider.BaseProvider):
     BASE_URL = pd_settings.BASE_URL
     CONTIGUOUS_UPLOAD_SIZE_LIMIT = pd_settings.CONTIGUOUS_UPLOAD_SIZE_LIMIT
     CHUNK_SIZE = pd_settings.CHUNK_SIZE
+    FORCE_RETRY_ON = {404, 409, 429}
 
     def __init__(self, auth, credentials, settings, **kwargs):
         super().__init__(auth, credentials, settings, **kwargs)
@@ -90,6 +91,8 @@ class DropboxProvider(provider.BaseProvider):
         :param tuple \*args: passed through to BaseProvider.make_request()
         :param dict \*\*kwargs: passed through to BaseProvider.make_request()
         """
+        kwargs['retry'] = kwargs.get('retry', pd_settings.RETRY)
+        kwargs['force_retry_on'] = kwargs.get('force_retry_on', self.FORCE_RETRY_ON)
         resp = await self.make_request(
             'POST',
             url,
@@ -129,7 +132,6 @@ class DropboxProvider(provider.BaseProvider):
         raise pd_exceptions.DropboxUnhandledConflictError(str(data))
 
     async def validate_v1_path(self, path: str, **kwargs) -> WaterButlerPath:
-        self.path = path
         if path == '/':
             return WaterButlerPath(path, prepend=self.folder)
         implicit_folder = path.endswith('/')
@@ -144,7 +146,6 @@ class DropboxProvider(provider.BaseProvider):
         return WaterButlerPath(path, prepend=self.folder)
 
     async def validate_path(self, path: str, **kwargs) -> WaterButlerPath:
-        self.path = path
         return WaterButlerPath(path, prepend=self.folder)
 
     def can_duplicate_names(self) -> bool:
@@ -180,14 +181,10 @@ class DropboxProvider(provider.BaseProvider):
                     throws=core_exceptions.IntraCopyError,
                 )
             else:
-                headers = {}
-                if self.NAME == 'dropboxbusiness':
-                    headers = {'Dropbox-API-Select-Admin': None, 'Dropbox-API-Select-User': self.admin_dbmid}
                 from_ref_data = await self.dropbox_request(
                     self.build_url('files', 'copy_reference', 'get'),
                     {'path': src_path.full_path.rstrip('/')},
                     throws=core_exceptions.IntraCopyError,
-                    headers=headers,
                 )
                 from_ref = from_ref_data['copy_reference']
 
@@ -196,7 +193,6 @@ class DropboxProvider(provider.BaseProvider):
                     {'copy_reference': from_ref, 'path': dest_path.full_path.rstrip('/')},
                     expects=(200, 201, 409),
                     throws=core_exceptions.IntraCopyError,
-                    headers=headers,
                 )
             data = data['metadata']
         except pd_exceptions.DropboxNamingConflictError:
@@ -578,6 +574,7 @@ class DropboxProvider(provider.BaseProvider):
             self.build_url('files', 'create_folder_v2'),
             {'path': path.full_path.rstrip('/')},
             throws=core_exceptions.CreateFolderError,
+            force_retry_on={409, 429},
         )
         return DropboxFolderMetadata(data['metadata'], self.folder, self.NAME)
 

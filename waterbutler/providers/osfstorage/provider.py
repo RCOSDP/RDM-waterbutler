@@ -5,13 +5,16 @@ import typing
 import hashlib
 import logging
 
+from waterbutler import settings as wb_settings
 from waterbutler.core import utils
+from waterbutler.core import signing
 from waterbutler.core import streams
 from waterbutler.core import provider
 from waterbutler.core import exceptions
 from waterbutler.core.path import WaterButlerPath
 from waterbutler.core.metadata import BaseMetadata
 
+from waterbutler.providers.osfstorage import settings
 from waterbutler.providers.osfstorage.metadata import OsfStorageFileMetadata
 from waterbutler.providers.osfstorage.metadata import OsfStorageFolderMetadata
 from waterbutler.providers.osfstorage.metadata import OsfStorageRevisionMetadata
@@ -38,11 +41,23 @@ class OSFStorageProvider(provider.BaseProvider):
 
     def __init__(self, auth, credentials, settings, **kwargs):
         super().__init__(auth, credentials, settings, **kwargs)
+        self.nid = settings['nid']
+        self.root_id = settings['rootId']
         self.BASE_URL = settings['baseUrl']
         self.provider_name = settings['storage'].get('provider')
 
+    async def make_signed_request(self, method, url, data=None, params=None, ttl=100, **kwargs):
+        url, data, params = self.build_signed_url(
+            method,
+            url,
+            data=data,
+            params=params,
+            ttl=ttl,
+            **kwargs
+        )
+        return await self.make_request(method, url, data=data, params=params, **kwargs)
+
     async def validate_v1_path(self, path, **kwargs):
-        self.path = path
         if path == '/' or path.strip('/') == self.root_id:
             return WaterButlerPath('/', _ids=[self.root_id], folder=True)
 
@@ -65,7 +80,6 @@ class OSFStorageProvider(provider.BaseProvider):
         return WaterButlerPath('/'.join(names), _ids=ids, folder=explicit_folder)
 
     async def validate_path(self, path, **kwargs):
-        self.path = path
         if path == '/' or path.strip('/') == self.root_id:
             return WaterButlerPath('/', _ids=[self.root_id], folder=True)
 
@@ -110,6 +124,20 @@ class OSFStorageProvider(provider.BaseProvider):
         except StopIteration:
             return base.child(path, folder=folder)
 
+    async def get_quota(self):
+        """Get the quota information
+
+        If the creator of the project doesn't have enough quota, we invalidate the upload request.
+        """
+        resp = await self.make_signed_request(
+            'GET',
+            '{}/api/v1/project/{}/creator_quota/'.format(wb_settings.OSF_URL, self.nid),
+            expects=(200, )
+        )
+        body = await resp.json()
+        await resp.release()
+        return body
+
     def make_provider(self, settings):
         """Requests on different files may need to use different providers,
         instances, e.g. when different files lives in different containers
@@ -118,7 +146,6 @@ class OSFStorageProvider(provider.BaseProvider):
 
         :param dict settings: Overridden settings
         """
-        self.settings['storage'].update({'nid': self.nid})
         if not getattr(self, '_inner_provider', None):
             self._inner_provider = utils.make_provider(
                 self.provider_name,
@@ -137,7 +164,7 @@ class OSFStorageProvider(provider.BaseProvider):
                                                   'different provider classes.'
 
         # Region does not apply to local development with filesystem as storage backend.
-        if self.settings['storage']['provider'] == 'filesystem' or other.settings['storage']['provider'] == 'filesystem':
+        if self.settings['storage']['provider'] == 'filesystem':
             return True
         # For 1-to-1 bucket-region mapping, bucket is the same if and only if region is the same
         return self.settings['storage']['bucket'] == other.settings['storage']['bucket']
@@ -153,6 +180,24 @@ class OSFStorageProvider(provider.BaseProvider):
 
     async def intra_copy(self, dest_provider, src_path, dest_path):
         return await self._do_intra_move_or_copy('copy', dest_provider, src_path, dest_path)
+
+    def build_signed_url(self, method, url, data=None, params=None, ttl=100, **kwargs):
+        signer = signing.Signer(settings.HMAC_SECRET, settings.HMAC_ALGORITHM)
+        if method.upper() in QUERY_METHODS:
+            signed = signing.sign_data(signer, params or {}, ttl=ttl)
+            params = signed
+        else:
+            signed = signing.sign_data(signer, json.loads(data or {}), ttl=ttl)
+            data = json.dumps(signed)
+
+        # Ensure url ends with a /
+        if not url.endswith('/'):
+            if '?' not in url:
+                url += '/'
+            elif url[url.rfind('?') - 1] != '/':
+                url = url.replace('?', '/?')
+
+        return url, data, params
 
     async def download(self, path, version=None, revision=None, mode=None, **kwargs):
         if not path.identifier:
@@ -346,7 +391,7 @@ class OSFStorageProvider(provider.BaseProvider):
             raise exceptions.OverwriteSelfError(src_path)
 
         self.provider_metrics.add('move.can_intra_move', False)
-        if self.can_intra_move(dest_provider, src_path) and isinstance(dest_provider, self.__class__) and dest_provider.root_id == self.root_id:
+        if self.can_intra_move(dest_provider, src_path):
             self.provider_metrics.add('move.can_intra_move', True)
             return await self.intra_move(*args)
 
@@ -370,7 +415,8 @@ class OSFStorageProvider(provider.BaseProvider):
                    dest_path: WaterButlerPath,
                    rename: str=None,
                    conflict: str='replace',
-                   handle_naming: bool=True) -> typing.Tuple[BaseMetadata, bool]:
+                   handle_naming: bool=True,
+                   version=None) -> typing.Tuple[BaseMetadata, bool]:
         """Override parent's copy to support cross-region osfstorage copies. Delegates to
         :meth:`.BaseProvider.copy` when destination is not osfstorage. If both providers are in the
         same region (i.e. `.can_intra_copy` is true), call `.intra_copy`. Otherwise, grab a
@@ -384,7 +430,7 @@ class OSFStorageProvider(provider.BaseProvider):
         # when moving to non-osfstorage, default move is fine
         if dest_provider.NAME != 'osfstorage':
             return await super().copy(dest_provider, src_path, dest_path, rename=rename,
-                                      conflict=conflict, handle_naming=handle_naming)
+                                      conflict=conflict, handle_naming=handle_naming, version=version)
 
         args = (dest_provider, src_path, dest_path)
         kwargs = {'rename': rename, 'conflict': conflict}
@@ -413,7 +459,7 @@ class OSFStorageProvider(provider.BaseProvider):
             raise exceptions.OverwriteSelfError(src_path)
 
         self.provider_metrics.add('copy.can_intra_copy', False)
-        if self.can_intra_copy(dest_provider, src_path) and isinstance(dest_provider, self.__class__) and dest_provider.root_id == self.root_id:
+        if self.can_intra_copy(dest_provider, src_path):
             self.provider_metrics.add('copy.can_intra_copy', True)
             return await self.intra_copy(*args)
 
@@ -531,7 +577,7 @@ class OSFStorageProvider(provider.BaseProvider):
 
         try:
             metadata = await provider.metadata(remote_complete_path)
-        except exceptions.MetadataError as e:
+        except (exceptions.MetadataError, exceptions.NotFoundError) as e:
             if e.code != 404:
                 raise
             metadata, _ = await provider.move(provider, remote_pending_path, remote_complete_path)

@@ -565,10 +565,8 @@ class TestUtils:
         assert provider_one.can_intra_move(provider_one)
 
     def test_can_intra_move_copy_false_region_mismatch(self, provider_one, provider_two):
-        with mock.patch('waterbutler.providers.osfstorage.provider.OSFStorageProvider.can_intra_move', return_value=False):
-            with mock.patch('waterbutler.providers.osfstorage.provider.OSFStorageProvider.can_intra_copy', return_value=False):
-                assert not provider_one.can_intra_copy(provider_two)
-                assert not provider_one.can_intra_move(provider_two)
+        assert not provider_one.can_intra_copy(provider_two)
+        assert not provider_one.can_intra_move(provider_two)
 
     def test_can_intra_move_copy_false_class_mismatch(self, provider_one):
         assert not provider_one.can_intra_copy(str())
@@ -704,16 +702,9 @@ class TestUploads:
         inner_provider.metadata = utils.MockCoroutine(return_value=utils.MockFileMetadata())
 
         url, _, params = provider.build_signed_url(
-            'POST',
-            '{}/api/v1/project/{}/institution_storage_user_quota/'.format(wb_settings.OSF_URL, provider.nid),
-            data=json.dumps({
-                'provider': provider.NAME,
-                'path': provider.root_id or provider.path or '/'
-            }),
-            headers={'Content-Type': 'application/json'}
-        )
+            'GET', '{}/api/v1/project/foo/creator_quota/'.format(wb_settings.OSF_URL))
         quota = {'max': 10000, 'used': 0}
-        aiohttpretty.register_json_uri('POST', url, body=quota, params=params)
+        aiohttpretty.register_json_uri('GET', url, body=quota, params=params)
 
         res, created = await provider.upload(file_stream, upload_path)
 
@@ -739,16 +730,9 @@ class TestUploads:
         provider, inner_provider = provider_and_mock_one
 
         url, _, params = provider.build_signed_url(
-            'POST',
-            '{}/api/v1/project/{}/institution_storage_user_quota/'.format(wb_settings.OSF_URL, provider.nid),
-            data=json.dumps({
-                'provider': provider.NAME,
-                'path': provider.root_id or provider.path or '/'
-            }),
-            headers={'Content-Type': 'application/json'}
-        )
+            'GET', '{}/api/v1/project/foo/creator_quota/'.format(wb_settings.OSF_URL))
         quota = {'max': 10000, 'used': 0}
-        aiohttpretty.register_json_uri('POST', url, body=quota, params=params)
+        aiohttpretty.register_json_uri('GET', url, body=quota, params=params)
 
         url = 'https://waterbutler.io/{}/children/'.format(upload_path.parent.identifier)
 
@@ -785,16 +769,9 @@ class TestUploads:
         provider, inner_provider = provider_and_mock_one
 
         url, _, params = provider.build_signed_url(
-            'POST',
-            '{}/api/v1/project/{}/institution_storage_user_quota/'.format(wb_settings.OSF_URL, provider.nid),
-            data=json.dumps({
-                'provider': provider.NAME,
-                'path': provider.root_id or provider.path or '/'
-            }),
-            headers={'Content-Type': 'application/json'}
-        )
+            'GET', '{}/api/v1/project/foo/creator_quota/'.format(wb_settings.OSF_URL))
         quota = {'max': 10000, 'used': 0}
-        aiohttpretty.register_json_uri('POST', url, body=quota, params=params)
+        aiohttpretty.register_json_uri('GET', url, body=quota, params=params)
 
         url = 'https://waterbutler.io/{}/children/'.format(upload_path.parent.identifier)
 
@@ -812,16 +789,9 @@ class TestUploads:
         provider, inner_provider = provider_and_mock_one
 
         url, _, params = provider.build_signed_url(
-            'POST',
-            '{}/api/v1/project/{}/institution_storage_user_quota/'.format(wb_settings.OSF_URL, provider.nid),
-            data=json.dumps({
-                'provider': provider.NAME,
-                'path': provider.root_id or provider.path or '/'
-            }),
-            headers={'Content-Type': 'application/json'}
-        )
+            'GET', '{}/api/v1/project/foo/creator_quota/'.format(wb_settings.OSF_URL))
         quota = {'max': 10000, 'used': 0}
-        aiohttpretty.register_json_uri('POST', url, body=quota, params=params)
+        aiohttpretty.register_json_uri('GET', url, body=quota, params=params)
 
         path = WaterButlerPath('/{}'.format(upload_response['data']['name']),
                                _ids=('Test', upload_response['data']['id']))
@@ -857,8 +827,7 @@ class TestCrossRegionMove:
         src_path = WaterButlerPath('/foo', _ids=('Test', '56ab34'))
         dest_path = WaterButlerPath('/', _ids=('Test',))
 
-        with mock.patch('waterbutler.providers.osfstorage.provider.OSFStorageProvider.can_intra_move', return_value=False):
-            metadata, created = await src_provider.move(dst_provider, src_path, dest_path,
+        metadata, created = await src_provider.move(dst_provider, src_path, dest_path,
                                                     handle_naming=False);
 
         assert metadata is not None
@@ -884,8 +853,7 @@ class TestCrossRegionMove:
         src_path = WaterButlerPath('/foo/', _ids=('Test', '56ab34'), folder=True)
         dest_path = WaterButlerPath('/', _ids=('Test',), folder=True)
 
-        with mock.patch('waterbutler.providers.osfstorage.provider.OSFStorageProvider.can_intra_move', return_value=False):
-            metadata, created = await src_provider.move(dst_provider, src_path, dest_path,
+        metadata, created = await src_provider.move(dst_provider, src_path, dest_path,
                                                     handle_naming=False);
 
         assert metadata is not None
@@ -964,8 +932,7 @@ class TestCrossRegionCopy:
         src_path = WaterButlerPath('/foo', _ids=('Test', '56ab34'))
         dest_path = WaterButlerPath('/', _ids=('Test',))
 
-        with mock.patch('waterbutler.providers.osfstorage.provider.OSFStorageProvider.can_intra_copy', return_value=False):
-            metadata, created = await src_provider.copy(dst_provider, src_path, dest_path,
+        metadata, created = await src_provider.copy(dst_provider, src_path, dest_path,
                                                     handle_naming=False);
 
         assert metadata is not None
@@ -990,8 +957,7 @@ class TestCrossRegionCopy:
         src_path = WaterButlerPath('/foo/', _ids=('Test', '56ab34'), folder=True)
         dest_path = WaterButlerPath('/', _ids=('Test',), folder=True)
 
-        with mock.patch('waterbutler.providers.osfstorage.provider.OSFStorageProvider.can_intra_copy', return_value=False):
-            metadata, created = await src_provider.copy(dst_provider, src_path, dest_path,
+        metadata, created = await src_provider.copy(dst_provider, src_path, dest_path,
                                                     handle_naming=False);
 
         assert metadata is not None
@@ -1022,7 +988,7 @@ class TestCrossRegionCopy:
         await src_provider.copy(dst_provider, src_path, dest_path, handle_naming=False);
 
         core_copy.assert_called_once_with(dst_provider, src_path, dest_path, rename=None,
-                                          conflict='replace', handle_naming=False);
+                                          conflict='replace', handle_naming=False, version=None);
         src_provider.download.assert_not_called()
 
     @pytest.mark.asyncio
@@ -1064,16 +1030,9 @@ class TestQuota:
         inner_provider.metadata = utils.MockCoroutine(return_value=utils.MockFileMetadata())
 
         url, _, params = provider.build_signed_url(
-            'POST',
-            '{}/api/v1/project/{}/institution_storage_user_quota/'.format(wb_settings.OSF_URL, provider.nid),
-            data=json.dumps({
-                'provider': provider.NAME,
-                'path': provider.root_id or provider.path or '/'
-            }),
-            headers={'Content-Type': 'application/json'}
-        )
+            'GET', '{}/api/v1/project/foo/creator_quota/'.format(wb_settings.OSF_URL))
         quota = {'max': 10000, 'used': 5000}
-        aiohttpretty.register_json_uri('POST', url, body=quota, params=params)
+        aiohttpretty.register_json_uri('GET', url, body=quota, params=params)
 
         quota = await provider.get_quota()
 

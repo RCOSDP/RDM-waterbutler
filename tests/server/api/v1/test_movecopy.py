@@ -16,8 +16,6 @@ class TestMoveOrCopy:
 
     def test_build_args(self, http_request, move_copy_args):
         handler = mock_handler(http_request)
-        handler.src_root_path = '123456789'
-        handler.dest_root_path = '123456789'
         assert handler.build_args() == move_copy_args
 
     @pytest.mark.asyncio
@@ -66,8 +64,6 @@ class TestMoveOrCopy:
                                    serialized_metadata, celery_src_copy_params,
                                    celery_dest_copy_params, serialized_request):
         handler = mock_handler(http_request)
-        handler.src_root_path = '123456789'
-        handler.dest_root_path = '123456789'
         mock_make_provider, mock_celery = mock_inter
         handler._json = {'action': action, 'path': '/test_path/'}
 
@@ -79,13 +75,15 @@ class TestMoveOrCopy:
                                               handler.auth['settings'])
         handler.write.assert_called_with(serialized_metadata)
         assert handler.dest_meta == mock_file_metadata
-        celery_src_copy_params['root_path'] = '123456789'
-        celery_dest_copy_params['root_path'] = 'test_path'
+        kwargs = {}
+        if action == 'copy':
+            kwargs = {'version': None}
         mock_celery.assert_called_with(celery_src_copy_params,
                                        celery_dest_copy_params,
                                        conflict='warn',
                                        rename=None,
-                                       request=serialized_request)
+                                       request=serialized_request,
+                                       **kwargs)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize('action', ['move', 'copy'])
@@ -137,8 +135,6 @@ class TestMoveOrCopy:
                           celery_dest_copy_params_root, serialized_request):
 
         handler = mock_handler(http_request)
-        handler.src_root_path = '123456789'
-        handler.dest_root_path = '123456789'
         mock_make_provider, mock_celery = mock_inter
         handler._json = {'action': 'rename', 'rename': 'renamed path', 'path': '/test_path/'}
 
@@ -154,8 +150,6 @@ class TestMoveOrCopy:
                                               handler.auth['settings'])
         handler.write.assert_called_with(serialized_metadata)
         assert handler.dest_meta == mock_file_metadata
-        celery_src_copy_params['root_path'] = '123456789'
-        celery_dest_copy_params_root['root_path'] = '123456789'
         mock_celery.assert_called_with(celery_src_copy_params,
                                        celery_dest_copy_params_root,
                                        conflict='warn',
