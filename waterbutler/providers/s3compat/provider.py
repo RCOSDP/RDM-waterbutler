@@ -718,7 +718,7 @@ class S3CompatProvider(provider.BaseProvider):
         resp = await self.make_request(
             'HEAD',
             functools.partial(
-                self.bucket.new_key(path.full_path).generate_url,
+                self.bucket.new_key(path.full_path).S3COMPAT_PROVIDER_CONFIG,
                 settings.TEMP_URL_SECS,
                 'HEAD',
                 query_parameters={'versionId': revision} if revision else None

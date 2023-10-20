@@ -112,6 +112,7 @@ def test_return_values(providers, bundles, callback, src_path, dest_path, mock_t
         'kind': 'file',
         'extra': {},
         'old_root_id': None,
+        'root_path': '123456789',
     }
 
     assert data['destination'] == {
@@ -133,6 +134,7 @@ def test_return_values(providers, bundles, callback, src_path, dest_path, mock_t
         'created_utc': metadata.created_utc,
         'size': metadata.size,
         'sizeInt': metadata.size_as_int,
+        'root_path': '123456789',
     }
 
 def test_starttime_override(providers, bundles, callback, mock_time, FAKE_TIME):
@@ -140,8 +142,8 @@ def test_starttime_override(providers, bundles, callback, mock_time, FAKE_TIME):
     src_bundle, dest_bundle = bundles
 
     stamp = FAKE_TIME
-    copy.copy(cp.deepcopy(src_bundle), cp.deepcopy(dest_bundle), start_time=stamp-100)
-    copy.copy(cp.deepcopy(src_bundle), cp.deepcopy(dest_bundle), start_time=stamp+100)
+    copy.copy(cp.deepcopy(src_bundle), cp.deepcopy(dest_bundle), start_time=stamp-100-tasks.settings.WAIT_TIMEOUT)
+    copy.copy(cp.deepcopy(src_bundle), cp.deepcopy(dest_bundle), start_time=stamp+100+tasks.settings.WAIT_TIMEOUT)
 
     (_, _, data), _ = callback.call_args_list[0]
 

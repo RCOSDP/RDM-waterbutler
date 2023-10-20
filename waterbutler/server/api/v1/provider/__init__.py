@@ -4,21 +4,20 @@ import asyncio
 import inspect  # noqa
 import logging
 from http import HTTPStatus
-
 import tornado.gen
 
 import sentry_sdk
 
 from waterbutler.core import utils
 from waterbutler.server import settings
-from waterbutler.utils import inspect_info  # noqa
+
+from waterbutler.settings import ADDON_METHOD_PROVIDER
 from waterbutler.server.api.v1 import core
 from waterbutler.core import remote_logging
 from waterbutler.server.auth import AuthHandler
 from waterbutler.core.log_payload import LogPayload
 from waterbutler.core.streams import RequestStreamReader
 from waterbutler.server.api.v1.provider.create import CreateMixin
-from waterbutler.auth.osf.handler import EXPORT_DATA_FAKE_NODE_ID
 from waterbutler.server.api.v1.provider.metadata import MetadataMixin
 from waterbutler.server.api.v1.provider.movecopy import MoveCopyMixin
 
@@ -40,7 +39,6 @@ class ProviderHandler(core.BaseHandler, CreateMixin, MetadataMixin, MoveCopyMixi
     PRE_VALIDATORS = {'put': 'prevalidate_put', 'post': 'prevalidate_post'}
     POST_VALIDATORS = {'put': 'postvalidate_put'}
     PATTERN = r'/resources/(?P<resource>(?:\w|\d)+)/providers/(?P<provider>(?:\w|\d)+)(?P<path>/.*/?)'
-    location_id = None
     callback_log = True
 
     async def prepare(self, *args, **kwargs):
@@ -68,8 +66,6 @@ class ProviderHandler(core.BaseHandler, CreateMixin, MetadataMixin, MoveCopyMixi
         callback_log = self.get_query_argument('callback_log', default='True')
         # as default callback_log is True
         self.callback_log = False if isinstance(callback_log, str) and callback_log.lower() == 'false' else True
-        if self.resource == EXPORT_DATA_FAKE_NODE_ID:
-            self.location_id = self.get_query_argument('location_id', default=None)
 
         with sentry_sdk.configure_scope() as scope:
             scope.set_tag('resource.id', self.resource)
@@ -86,11 +82,22 @@ class ProviderHandler(core.BaseHandler, CreateMixin, MetadataMixin, MoveCopyMixi
         # Delay setup of the provider when method is post, as we need to evaluate the json body
         # action.
         if method != 'post':
+            logger.debug(f'org path is \'{self.path}\'')
             self.auth = await auth_handler.get(
                 self.resource, provider, self.request,
                 path=self.path, version=self.requested_version,
-                callback_log=self.callback_log,
-                location_id=self.location_id)
+                callback_log=self.callback_log)
+            # Remove addon provider root path in org path
+            if provider in ADDON_METHOD_PROVIDER:
+                self.root_path = self.path.strip('/').split('/')[0]
+                paths = self.path.strip('/').split('/')
+                paths.pop(0)
+                if self.path.endswith('/') and len(paths) > 0:
+                    self.path = '/' + '/'.join(paths) + '/'
+                else:
+                    self.path = '/' + '/'.join(paths)
+
+            logger.debug(f'path without addon provider root path \'{self.path}\'')
             self.provider = utils.make_provider(
                 provider, self.auth['auth'],
                 self.auth['credentials'], self.auth['settings'])
@@ -124,12 +131,14 @@ class ProviderHandler(core.BaseHandler, CreateMixin, MetadataMixin, MoveCopyMixi
         Will redirect to a signed URL if possible and accept_url is not False
         :raises: MustBeFileError if path is not a file
         """
+        logger.debug(f'provider root path is \'{self.root_path}\'')
         if self.path.is_dir:
             return (await self.get_folder())
         return (await self.get_file())
 
     async def put(self, **_):
         """Defined in CreateMixin"""
+        logger.debug(f'provider root path is \'{self.root_path}\'')
         if self.target_path.is_file:
             return (await self.upload_file())
         return (await self.create_folder())
@@ -161,7 +170,8 @@ class ProviderHandler(core.BaseHandler, CreateMixin, MetadataMixin, MoveCopyMixi
         _, self.writer = await asyncio.open_unix_connection(sock=self.wsock)
 
         self.stream = RequestStreamReader(self.request, self.reader)
-        self.uploader = asyncio.ensure_future(self.provider.upload(self.stream, self.target_path))
+        # root_node_path = re.findall('^.*\\/([a-zA-Z0-9]*)\\/\\?name.*$', self.request.uri)[0]
+        self.uploader = asyncio.ensure_future(self.provider.upload(self.stream, self.target_path, root_node_path=self.root_path))
 
     def on_finish(self):
         status, method = self.get_status(), self.request.method.upper()
@@ -228,7 +238,13 @@ class ProviderHandler(core.BaseHandler, CreateMixin, MetadataMixin, MoveCopyMixi
         else:
             return
 
+        kwargs = {}
+        if getattr(self, 'root_path', None):
+            kwargs['src_root_path'] = self.root_path
+        if getattr(self, 'dest_root_path', None):
+            kwargs['dest_root_path'] = getattr(self, 'dest_root_path', None)
+
         remote_logging.log_file_action(action, source=source, destination=destination, api_version='v1',
                                        request=remote_logging._serialize_request(self.request),
                                        bytes_downloaded=self.bytes_downloaded,
-                                       bytes_uploaded=self.bytes_uploaded,)
+                                       bytes_uploaded=self.bytes_uploaded, **kwargs)

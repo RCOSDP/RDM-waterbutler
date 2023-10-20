@@ -104,10 +104,10 @@ class S3Provider(provider.BaseProvider):
         return True
 
     def can_intra_copy(self, dest_provider, path=None):
-        return False
+        return type(self) == type(dest_provider) and not getattr(path, 'is_dir', False)
 
     def can_intra_move(self, dest_provider, path=None):
-        return False
+        return type(self) == type(dest_provider) and not getattr(path, 'is_dir', False)
 
     async def intra_copy(self, dest_provider, source_path, dest_path):
         """Copy key from one S3 bucket to another. The credentials specified in

@@ -100,6 +100,7 @@ class OneDriveProvider(provider.BaseProvider):
         logger.debug('validate_v1_path self::{} path::{} kwargs::{}'.format(repr(self),
                                                                             path, kwargs))
 
+        self.path = path
         if path == '/':
             return OneDrivePath(path, _ids=[self.folder])
 
@@ -149,6 +150,7 @@ class OneDriveProvider(provider.BaseProvider):
         return od_path
 
     async def validate_path(self, path: str, **kwargs) -> OneDrivePath:
+        self.path = path
         logger.debug('validate_path self::{} path::{} kwargs::{}'.format(repr(self), path, kwargs))
 
         if path == '/':
@@ -660,11 +662,9 @@ class OneDriveProvider(provider.BaseProvider):
         :rtype: OneDriveFileMetadata
         :raises: :class:`waterbutler.core.exceptions.UploadError`
         """
-        url = self._build_drive_url(
-            *path.parent.api_identifier[0:-1],
-            '{}:'.format(path.parent.api_identifier[-1]),
-            '{}:'.format(path.name),
-            'content'
+        url = '{}:/{}:/content'.format(
+            self._build_drive_url(*path.parent.api_identifier),
+            path.name,
         )
         logger.debug("_upload_empty_file url::{}".format(url))
         resp = await self.make_request(
@@ -691,11 +691,9 @@ class OneDriveProvider(provider.BaseProvider):
         :rtype: OneDriveFileMetadata
         :raises: :class:`waterbutler.core.exceptions.UploadError`
         """
-        url = self._build_drive_url(
-            *path.parent.api_identifier[0:-1],
-            '{}:'.format(path.parent.api_identifier[-1]),
-            '{}:'.format(path.name),
-            'createUploadSession'
+        url = '{}:/{}:/createUploadSession'.format(
+            self._build_drive_url(*path.parent.api_identifier),
+            path.name,
         )
         logger.debug("_resumed_upload start url::{}".format(url))
         resp = await self.make_request(

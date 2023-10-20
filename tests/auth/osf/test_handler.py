@@ -8,10 +8,9 @@ from tests.server.api.v1.utils import ServerTestCase
 
 from waterbutler.auth.osf import settings
 from waterbutler.core.auth import AuthType
-from waterbutler.auth.osf.handler import OsfAuthHandler, EXPORT_DATA_FAKE_NODE_ID
+from waterbutler.auth.osf.handler import OsfAuthHandler
 from waterbutler.core.exceptions import (UnsupportedHTTPMethodError,
                                             UnsupportedActionError)
-from waterbutler.settings import MFR_IDENTIFYING_HEADER
 
 
 class TestOsfAuthHandler(ServerTestCase):
@@ -72,10 +71,6 @@ class TestOsfAuthHandler(ServerTestCase):
         provider = 'test'
         action = 'copy'
         self.request.method = 'post'
-        self.request.headers['Authorization'] = 'test'
-        self.request.headers[MFR_IDENTIFYING_HEADER] = 'test'
-        self.request.query_arguments['cookie'] = [b'auth']
-        self.request.query_arguments['view_only'] = [b'1']
 
         self.handler.build_payload = mock.Mock()
 
@@ -90,13 +85,11 @@ class TestOsfAuthHandler(ServerTestCase):
                     'version': None,
                     'metrics': {
                         'referrer': None,
-                        'user_agent': None,
                         'origin': None,
                         'uri': settings.API_URL,
-                        'user_agent': None,
-                    },
-                    'callback_log': True
-                }, cookie='auth', view_only='1')
+                        'user_agent': None
+                    }
+                }, cookie=None, view_only=None)
             else:
                 self.handler.build_payload.assert_called_with({
                     'nid': 'test',
@@ -106,42 +99,11 @@ class TestOsfAuthHandler(ServerTestCase):
                     'version': None,
                     'metrics': {
                         'referrer': None,
-                        'user_agent': None,
                         'origin': None,
                         'uri': settings.API_URL,
-                        'user_agent': None,
-                    },
-                    'callback_log': True
-                }, cookie='auth', view_only='1')
-
-    @tornado.testing.gen_test
-    async def test_fake_resource__action_post_copy__with_auth_type_source(self):
-
-        resource = EXPORT_DATA_FAKE_NODE_ID
-        provider = 'test'
-        action = 'copy'
-        self.request.method = 'post'
-
-        self.handler.build_payload = mock.Mock()
-
-        auth_type = AuthType.SOURCE
-        await self.handler.get(resource, provider, self.request, action=action, auth_type=auth_type, location_id=1)
-        self.handler.build_payload.assert_called_with({
-            'nid': resource,
-            'provider': provider,
-            'action': 'download',
-            'path': '',
-            'version': None,
-            'metrics': {
-                'referrer': None,
-                'user_agent': None,
-                'origin': None,
-                'uri': settings.API_URL,
-                'user_agent': None
-            },
-            'callback_log': True,
-            'location_id': 1,
-        }, cookie=None, view_only=None)
+                        'user_agent': None
+                    }
+                }, cookie=None, view_only=None)
 
 
 class TestActionMapping:
