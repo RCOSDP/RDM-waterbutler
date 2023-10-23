@@ -168,7 +168,8 @@ def move_copy_args():
                 'auth': {},
                 'settings': {}
             },
-            'path': '/test_path'
+            'path': '/test_path',
+            'root_path': '123456789'
         },
         {
             'nid': 'test_dest_resource',
@@ -177,7 +178,8 @@ def move_copy_args():
                 'name': 'MockProvider',
                 'auth': {},
                 'settings': {}
-            }, 'path': '/test_dest_path'
+            }, 'path': '/test_dest_path',
+            'root_path': '123456789'
         }
     )
 

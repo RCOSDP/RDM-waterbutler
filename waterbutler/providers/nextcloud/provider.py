@@ -104,6 +104,7 @@ class NextcloudProvider(provider.BaseProvider):
         :rtype: `waterbutler.core.path.WaterButlerPath`
         :raises `waterbutler.core.exceptions.NotFoundError`: if the path doesn't exist
         """
+        self.path = path
         if path == '/':
             return WaterButlerPath(path, prepend=self.folder)
         full_path = WaterButlerPath(path, prepend=self.folder)
@@ -137,6 +138,7 @@ class NextcloudProvider(provider.BaseProvider):
         :return: WaterButlerPath object representing ``path``
         :rtype: :class:`waterbutler.core.path.WaterButlerPath`
         """
+        self.path = path
         if path == '/':
             return WaterButlerPath(path, prepend=self.folder)
         full_path = WaterButlerPath(path, prepend=self.folder)

@@ -797,22 +797,16 @@ class TestIntraMoveCopy:
             'from_path': src_path.full_path.rstrip('/'),
             'to_path': dest_path.full_path.rstrip('/')
         }
-        conflict_response = {
+        aiohttpretty.register_json_uri('POST', url, **{
+            "responses": [
+                {
                     'headers': {'Content-Type': 'application/json'},
                     'data': data,
                     'body': json.dumps(
                                 error_fixtures['rename_conflict_folder_metadata']
                             ).encode('utf-8'),
                     'status': HTTPStatus.CONFLICT
-                }
-        aiohttpretty.register_json_uri('POST', url, **{
-            "responses": [
-                conflict_response,
-                conflict_response,
-                conflict_response,
-                conflict_response,
-                conflict_response,
-                conflict_response,
+                },
                 {
                     'headers': {'Content-Type': 'application/json'},
                     'data': data,
@@ -956,20 +950,14 @@ class TestIntraMoveCopy:
            'from_path': src_path.full_path.rstrip('/'),
            'to_path': dest_path.full_path.rstrip('/')
         }
-        conflict_response = {
+        aiohttpretty.register_json_uri('POST', url, **{
+            "responses": [
+                {
                     'headers': {'Content-Type': 'application/json'},
                     'data': data,
                     'body': json.dumps(error_fixtures['rename_conflict_file_metadata']).encode('utf-8'),
                     'status': HTTPStatus.CONFLICT
-                }
-        aiohttpretty.register_json_uri('POST', url, **{
-            "responses": [
-                conflict_response,
-                conflict_response,
-                conflict_response,
-                conflict_response,
-                conflict_response,
-                conflict_response,
+                },
                 {
                     'headers': {'Content-Type': 'application/json'},
                     'data': data,

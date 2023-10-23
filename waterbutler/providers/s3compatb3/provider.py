@@ -88,6 +88,7 @@ class S3CompatB3Provider(provider.BaseProvider):
         self.prefix = settings.get('prefix', '')
 
     async def validate_v1_path(self, path, **kwargs):
+        self.path = path
         wbpath = WaterButlerPath(path, prepend=self.prefix)
         if path == '/':
             return wbpath
@@ -108,6 +109,7 @@ class S3CompatB3Provider(provider.BaseProvider):
         return wbpath
 
     async def validate_path(self, path, **kwargs):
+        self.path = path
         return WaterButlerPath(path, prepend=self.prefix)
 
     def can_duplicate_names(self):

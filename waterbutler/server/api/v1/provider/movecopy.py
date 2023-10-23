@@ -1,3 +1,4 @@
+import logging
 import json
 from http import HTTPStatus
 
@@ -10,9 +11,10 @@ from waterbutler.core import remote_logging
 from waterbutler.server.auth import AuthHandler
 from waterbutler.core.utils import make_provider
 from waterbutler.constants import DEFAULT_CONFLICT
-from waterbutler.auth.osf.handler import EXPORT_DATA_FAKE_NODE_ID
+from waterbutler.settings import ADDON_METHOD_PROVIDER
 
 auth_handler = AuthHandler(settings.AUTH_HANDLERS)
+logger = logging.getLogger(__name__)
 
 
 class MoveCopyMixin:
@@ -42,15 +44,37 @@ class MoveCopyMixin:
             raise exceptions.InvalidParameters('Content-Length is required', code=411)
 
     def build_args(self):
+        if hasattr(self, 'src_root_path'):
+            logger.debug(f'Addon provider src root path is \'{self.src_root_path}\'')
+        if hasattr(self, 'dest_root_path'):
+            logger.debug(f'Addon provider dest root path is \'{self.dest_root_path}\'')
+        logger.debug(f'Src path is \'{self.path}\'')
+        logger.debug(f'Dest path is \'{self.dest_path}\'')
         return ({
             'nid': self.resource,  # TODO rename to anything but nid
             'path': self.path,
-            'provider': self.provider.serialized()
+            'provider': self.provider.serialized(),
+            'root_path': self.src_root_path if hasattr(self, 'src_root_path') else None
         }, {
             'nid': self.dest_resource,
             'path': self.dest_path,
-            'provider': self.dest_provider.serialized()
+            'provider': self.dest_provider.serialized(),
+            'root_path': self.dest_root_path if hasattr(self, 'dest_root_path') else None
         })
+
+    async def get_file_size(self, data):
+        size = 0
+        for x in data:
+            if x.kind == 'file':
+                size += int(x.size)
+            else:
+                child_path = await self.provider.validate_v1_path(x.path, **self.arguments)
+                data_child = await self.provider.metadata(child_path, version=None, revision=None, next_token=None)
+                if data_child and isinstance(data_child[-1], str):
+                    data_child, token = self.provider.handle_data(data_child)
+                size += await self.get_file_size(data_child)
+            logger.warning(f'size is {size}')
+        return size
 
     async def move_or_copy(self):
         """Copy, move, and rename files and folders.
@@ -80,9 +104,7 @@ class MoveCopyMixin:
                 raise exceptions.InvalidParameters('"rename" field is required for renaming')
             provider_action = 'move'
 
-        if self.resource == EXPORT_DATA_FAKE_NODE_ID:
-            self.location_id = self.get_query_argument('location_id', default=None)
-
+        logger.debug(f'Org path is \'{self.path}\'')
         self.auth = await auth_handler.get(
             self.resource,
             provider,
@@ -91,14 +113,27 @@ class MoveCopyMixin:
             auth_type=AuthType.SOURCE,
             path=self.path,
             version=self.requested_version,
-            location_id=self.location_id,
         )
+
+        # Remove addon provider root path
+        if provider in ADDON_METHOD_PROVIDER:
+            self.src_root_path = self.path.strip('/').split('/')[0]
+            self.root_path = self.src_root_path
+            self.dest_root_path = self.src_root_path
+            paths = self.path.strip('/').split('/')
+            paths.pop(0)
+            if self.path.endswith('/') and len(paths) > 0:
+                self.path = '/' + '/'.join(paths) + '/'
+            else:
+                self.path = '/' + '/'.join(paths)
+        logger.debug(f'Path without provider addon root path is \'{self.path}\'')
         self.provider = make_provider(
             provider,
             self.auth['auth'],
             self.auth['credentials'],
             self.auth['settings']
         )
+
         self.path = await self.provider.validate_v1_path(self.path, **self.arguments)
 
         if auth_action == 'rename':  # 'rename' implies the file/folder does not change location
@@ -124,9 +159,6 @@ class MoveCopyMixin:
             # Note: attached to self so that _send_hook has access to these
             self.dest_resource = self.json.get('resource', self.resource)
 
-            if self.dest_resource == EXPORT_DATA_FAKE_NODE_ID:
-                self.location_id = self.get_query_argument('location_id', default=None)
-
             self.dest_auth = await auth_handler.get(
                 self.dest_resource,
                 self.json.get('provider', self.provider.NAME),
@@ -134,7 +166,6 @@ class MoveCopyMixin:
                 action=auth_action,
                 auth_type=AuthType.DESTINATION,
                 path=path,
-                location_id=self.location_id,
             )
             self.dest_provider = make_provider(
                 self.json.get('provider', self.provider.NAME),
@@ -142,21 +173,46 @@ class MoveCopyMixin:
                 self.dest_auth['credentials'],
                 self.dest_auth['settings']
             )
-            self.dest_path = await self.dest_provider.validate_path(**self.json)
 
+            # Remove addon provider root path
+            if self.json.get('provider', self.provider.NAME) in ADDON_METHOD_PROVIDER:
+                self.dest_root_path = path.strip('/').split('/')[0]
+                paths = path.strip('/').split('/')
+                paths.pop(0)
+                if path.endswith('/') and len(paths) > 0:
+                    self.json['path'] = '/' + '/'.join(paths) + '/'
+                else:
+                    self.json['path'] = '/' + '/'.join(paths)
+            else:
+                self.dest_root_path = self.json['path'].strip('/').split('/')[0]
+
+            # verify quota if it is osfstorage
+            if self.dest_provider.NAME == 'osfstorage' or self.dest_provider.NAME in ADDON_METHOD_PROVIDER:
+                size = self.json.get('size', None)
+                if size:
+                    file_size = int(size)
+                else:
+                    data = await self.provider.metadata(self.path, version=None, revision=None, next_token=None)
+                    if data and isinstance(data[-1], str):
+                        data, token = self.provider.handle_data(data)
+                    logger.warning(f'data is {data}')
+                    file_size = await self.get_file_size(data)
+                if self.dest_provider.NAME in ADDON_METHOD_PROVIDER:
+                    self.dest_provider.root_path = self.dest_root_path
+                quota = await self.dest_provider.get_quota()
+                if quota['used'] + file_size > quota['max']:
+                    raise exceptions.NotEnoughQuotaError('You do not have enough available quota.')
+
+            self.dest_path = await self.dest_provider.validate_path(**self.json)
         if not getattr(self.provider, 'can_intra_' + provider_action)(self.dest_provider, self.path):
+            logger.debug('Move/copy without intra. ')
             # this weird signature syntax courtesy of py3.4 not liking trailing commas on kwargs
             conflict = self.json.get('conflict', DEFAULT_CONFLICT)
-            task_kwargs = {}
-            if provider_action == 'copy':
-                # Only copy API has additional 'version' argument
-                task_kwargs = {'version': self.requested_version}
             result = await getattr(tasks, provider_action).adelay(
                 rename=self.json.get('rename'),
                 conflict=conflict,
                 request=remote_logging._serialize_request(self.request),
-                *self.build_args(),
-                **task_kwargs,
+                *self.build_args()
             )
             metadata, created = await tasks.wait_on_celery(result)
         else:
@@ -177,5 +233,9 @@ class MoveCopyMixin:
             self.set_status(int(HTTPStatus.CREATED))
         else:
             self.set_status(int(HTTPStatus.OK))
-
-        self.write({'data': metadata.json_api_serialized(self.dest_resource)})
+        if self.json.get('provider', self.provider.NAME) in ADDON_METHOD_PROVIDER:
+            logger.debug('Update metadata for addon provider. ')
+            metadata.root_path = self.dest_root_path
+            self.write({'data': metadata.json_api_serialized(self.dest_resource, root_path=self.dest_root_path)})
+        else:
+            self.write({'data': metadata.json_api_serialized(self.dest_resource)})

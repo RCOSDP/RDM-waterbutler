@@ -329,7 +329,7 @@ class TestCopy:
         ret = await provider1.copy(provider1, src_path, dest_path)
 
         assert ret == 'Upload return'
-        provider1.download.assert_called_once_with(src_path, version=None)
+        provider1.download.assert_called_once_with(src_path)
         provider1.upload.assert_called_once_with('Download return', dest_path)
 
 

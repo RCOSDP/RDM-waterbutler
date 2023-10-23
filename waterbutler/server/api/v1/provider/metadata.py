@@ -36,6 +36,8 @@ class MetadataMixin:
         self.set_header('X-Waterbutler-Metadata', json.dumps(data.json_api_serialized(self.resource)))
 
     async def get_folder(self):
+        logger.debug(f'provider root path is \'{self.root_path}\'')
+        logger.debug(f'folder path is \'{self.path}\'')
         if 'zip' in self.request.query_arguments:
             return (await self.download_folder_as_zip())
 
@@ -50,14 +52,14 @@ class MetadataMixin:
 
         if data and isinstance(data[-1], str):
             data, token = self.provider.handle_data(data)
-
-        ret = {'data': [x.json_api_serialized(self.resource) for x in data]}
+        ret = {'data': [x.json_api_serialized(self.resource, root_path=self.root_path) for x in data]}
         if token is not None:
             ret['next_token'] = token
 
         return self.write(ret)
 
     async def get_file(self):
+        logger.debug(f'provider root path is \'{self.root_path}\'')
         if 'meta' in self.request.query_arguments:
             return (await self.file_metadata())
 
@@ -89,6 +91,11 @@ class MetadataMixin:
         if isinstance(stream, str):
             return self.redirect(stream)
 
+        is_compression = is_chunked = False
+        if isinstance(stream, ResponseStreamReader):
+            is_compression = 'gzip' in stream.response.headers.get('Content-Encoding', '')
+            is_chunked = 'chunked' in stream.response.headers.get('Transfer-Encoding', '')
+
         if getattr(stream, 'partial', None):
             # Use getattr here as not all stream may have a partial attribute
             # Plus it fixes tests
@@ -99,7 +106,12 @@ class MetadataMixin:
             self.set_header('Content-Type', stream.content_type)
 
         logger.debug('stream size is: {}'.format(stream.size))
-        if stream.size is not None:
+        # - In chunked transfer encoding, the data stream is divided into a series of non-overlapping "chunks".
+        # The Content-Length header can be omitted in this case
+        # - Another case, If the Content-Encoding header is `gzip`,
+        # the Content-Length is equal to the length of the body after the Content-Encoding.
+        # We need adjust it after loading the entire body
+        if not (is_chunked or is_compression) and stream.size is not None:
             self.set_header('Content-Length', str(stream.size))
 
         # Build `Content-Disposition` header from `displayName` override,
@@ -112,12 +124,16 @@ class MetadataMixin:
         self.set_header('Content-Disposition', make_disposition(name))
 
         _, ext = os.path.splitext(name)
-        # If the file extention is in mime_types
+        # If the file extension is in mime_types
         # override the content type to fix issues with safari shoving in new file extensions
         if ext in mime_types:
             self.set_header('Content-Type', mime_types[ext])
 
         await self.write_stream(stream)
+
+        # update response headers by the original size after decompressing
+        if (is_chunked or is_compression) and self.bytes_downloaded is not None:
+            self.set_header('Content-Length', str(self.bytes_downloaded))
 
         if getattr(stream, 'partial', False) and isinstance(stream, ResponseStreamReader):
             await stream.response.release()
@@ -127,16 +143,23 @@ class MetadataMixin:
     async def file_metadata(self):
         version = self.requested_version
         metadata = await self.provider.metadata(self.path, revision=version)
-
-        return self.write({
-            'data': metadata.json_api_serialized(self.resource)
-        })
+        if getattr(self, 'root_path', None):
+            return self.write({
+                'data': metadata.json_api_serialized(self.resource, root_path=self.root_path)
+            })
+        else:
+            return self.write({
+                'data': metadata.json_api_serialized(self.resource)
+            })
 
     async def get_file_revisions(self):
+        logger.debug(f'provider root path is \'{self.root_path}\'')
         result = self.provider.revisions(self.path)
 
         if asyncio.iscoroutine(result):
             result = await result
+            for r in result:
+                r.root_path = self.root_path
 
         return self.write({'data': [r.json_api_serialized() for r in result]})
 

@@ -1,12 +1,6 @@
-import inspect  # noqa
-
-import logging
 from stevedore import driver
 
-from waterbutler.utils import inspect_info  # noqa
 from waterbutler.core.auth import AuthType
-
-logger = logging.getLogger(__name__)
 
 
 class AuthHandler:
@@ -28,16 +22,11 @@ class AuthHandler:
         raise AuthHandler('no valid credential found')
 
     async def get(self, resource, provider, request, action=None, auth_type=AuthType.SOURCE,
-                  path='', version=None,
-                  callback_log=True,
-                  location_id=None):
+                  path='', version=None):
         for extension in self.manager.extensions:
-            credential = await extension.obj.get(
-                resource, provider, request,
-                action=action, auth_type=auth_type,
-                path=path, version=version,
-                callback_log=callback_log,
-                location_id=location_id)
+            credential = await extension.obj.get(resource, provider, request,
+                                                 action=action, auth_type=auth_type,
+                                                 path=path, version=version)
             if credential:
                 return credential
         raise AuthHandler('no valid credential found')
