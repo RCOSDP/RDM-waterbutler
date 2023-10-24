@@ -101,7 +101,7 @@ class OsfAuthHandler(BaseAuthHandler):
         return payload
 
     async def get(self, resource, provider, request, action=None, auth_type=AuthType.SOURCE,
-                  path='', version=None):
+                  path='', version=None, callback_log=True):
         """Used for v1"""
         method = request.method.lower()
 
@@ -151,23 +151,26 @@ class OsfAuthHandler(BaseAuthHandler):
             # View only must go outside of the jwt
             view_only = view_only[0].decode()
 
+        data = {
+            'nid': resource,
+            'provider': provider,
+            'action': osf_action,
+            'path': path,
+            'version': version,
+            'metrics': {
+                'referrer': request.headers.get('Referer'),
+                'user_agent': request.headers.get('User-Agent'),
+                'origin': request.headers.get('Origin'),
+                'uri': request.uri,
+            },
+            'callback_log': callback_log
+        }
+
         payload = await self.make_request(
-            self.build_payload({
-                'nid': resource,
-                'provider': provider,
-                'action': osf_action,
-                'path': path,
-                'version': version,
-                'metrics': {
-                    'referrer': request.headers.get('Referer'),
-                    'user_agent': request.headers.get('User-Agent'),
-                    'origin': request.headers.get('Origin'),
-                    'uri': request.uri,
-                }
-            }, cookie=cookie, view_only=view_only),
+            self.build_payload(data, cookie=cookie, view_only=view_only),
             headers,
             dict(request.cookies)
         )
 
-        payload['auth']['callback_url'] = payload['callback_url']
+        payload['auth']['callback_url'] = payload['callback_url'] if callback_log else ''
         return payload
