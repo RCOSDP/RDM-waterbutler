@@ -11,7 +11,7 @@ from waterbutler.server.auth import AuthHandler
 from waterbutler.core.utils import make_provider
 from waterbutler.constants import DEFAULT_CONFLICT
 from waterbutler.auth.osf.handler import EXPORT_DATA_FAKE_NODE_ID
-from waterbutler.tasks.settings import EXPORT_RESTORE_TIMEOUT
+from waterbutler.tasks.settings import SYNCHRONOUS_TIMEOUT
 
 auth_handler = AuthHandler(settings.AUTH_HANDLERS)
 
@@ -145,10 +145,6 @@ class MoveCopyMixin:
             )
             self.dest_path = await self.dest_provider.validate_path(**self.json)
 
-        # Check if this process is related to export/restore process
-        access_to_location_storage = self.resource == EXPORT_DATA_FAKE_NODE_ID or self.dest_resource == EXPORT_DATA_FAKE_NODE_ID
-        is_export_or_restore_process = provider_action == 'copy' and access_to_location_storage and self.location_id is not None
-
         if not getattr(self.provider, 'can_intra_' + provider_action)(self.dest_provider, self.path):
             # this weird signature syntax courtesy of py3.4 not liking trailing commas on kwargs
             conflict = self.json.get('conflict', DEFAULT_CONFLICT)
@@ -163,11 +159,13 @@ class MoveCopyMixin:
                 *self.build_args(),
                 **task_kwargs,
             )
-            if is_export_or_restore_process:
-                # If this is export or restore process then use custom timeout value
-                metadata, created = await tasks.wait_on_celery(result, timeout=EXPORT_RESTORE_TIMEOUT)
+            synchronous = self.json.get('synchronous', 'false')
+            synchronous = True if isinstance(synchronous, bool) and synchronous is True else False
+            if synchronous:
+                # Use SYNCHRONOUS_TIMEOUT value for synchronous processes
+                metadata, created = await tasks.wait_on_celery(result, timeout=SYNCHRONOUS_TIMEOUT)
             else:
-                # For other existing process, use default timeout value
+                # Use default timeout value for asynchronous processes
                 metadata, created = await tasks.wait_on_celery(result)
         else:
             metadata, created = (

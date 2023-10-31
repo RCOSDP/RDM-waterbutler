@@ -124,7 +124,7 @@ class TestMoveOrCopy:
         handler = mock_handler(http_request)
         mock_make_provider, mock_celery = mock_inter
         handler.dest_resource = 'export_location'
-        handler._json = {'action': 'copy', 'path': '/test_path/', 'resource': 'export_location', 'provider': 'MockProvider'}
+        handler._json = {'action': 'copy', 'path': '/test_path/', 'resource': 'export_location', 'provider': 'MockProvider', 'synchronous': True}
 
         await handler.move_or_copy()
 
