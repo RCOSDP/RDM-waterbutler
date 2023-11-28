@@ -108,7 +108,6 @@ class S3CompatProvider(provider.BaseProvider):
         self.prefix = settings.get('prefix', '')
 
     async def validate_v1_path(self, path, **kwargs):
-        self.path = path
         wbpath = WaterButlerPath(path, prepend=self.prefix)
         if path == '/':
             return wbpath
@@ -141,17 +140,16 @@ class S3CompatProvider(provider.BaseProvider):
         return wbpath
 
     async def validate_path(self, path, **kwargs):
-        self.path = path
         return WaterButlerPath(path, prepend=self.prefix)
 
     def can_duplicate_names(self):
         return True
 
     def can_intra_copy(self, dest_provider, path=None):
-        return type(self) == type(dest_provider) and not getattr(path, 'is_dir', False)
+        return False
 
     def can_intra_move(self, dest_provider, path=None):
-        return type(self) == type(dest_provider) and not getattr(path, 'is_dir', False)
+        return False
 
     async def intra_copy(self, dest_provider, source_path, dest_path):
         """Copy key from one S3 Compatible Storage bucket to another. The credentials specified in
@@ -184,8 +182,8 @@ class S3CompatProvider(provider.BaseProvider):
         r"""Returns a ResponseWrapper (Stream) for the specified path
         raises FileNotFoundError if the status from S3 is not 200
 
-        :param str path: Path to the key you want to download
-        :param dict \*\*kwargs: Additional arguments that are ignored
+        :param path: ( :class:`.WaterButlerPath` ) Path to the key you want to download
+        :param kwargs: (dict) Additional arguments that are ignored
         :rtype: :class:`waterbutler.core.streams.ResponseStreamReader`
         :raises: :class:`waterbutler.core.exceptions.DownloadError`
         """
@@ -227,7 +225,7 @@ class S3CompatProvider(provider.BaseProvider):
         """Uploads the given stream to S3 Compatible Storage
 
         :param waterbutler.core.streams.RequestWrapper stream: The stream to put to S3 Compatible Storage
-        :param str path: The full path of the key to upload to/into
+        :param path: ( :class:`.WaterButlerPath` ) The full path of the key to upload to/into
 
         :rtype: dict, bool
         """
@@ -310,7 +308,7 @@ class S3CompatProvider(provider.BaseProvider):
             headers = {'x-amz-server-side-encryption': 'AES256'}
         params = {'uploads': ''}
         upload_url = functools.partial(
-            self.bucket.new_key(path.path).generate_url,
+            self.bucket.new_key(path.full_path).generate_url,
             settings.TEMP_URL_SECS,
             'POST',
             query_parameters=params,
@@ -359,7 +357,7 @@ class S3CompatProvider(provider.BaseProvider):
             'uploadId': session_upload_id,
         }
         upload_url = functools.partial(
-            self.bucket.new_key(path.path).generate_url,
+            self.bucket.new_key(path.full_path).generate_url,
             settings.TEMP_URL_SECS,
             'PUT',
             query_parameters=params,
@@ -400,7 +398,7 @@ class S3CompatProvider(provider.BaseProvider):
         headers = {}
         params = {'uploadId': session_upload_id}
         abort_url = functools.partial(
-            self.bucket.new_key(path.path).generate_url,
+            self.bucket.new_key(path.full_path).generate_url,
             settings.TEMP_URL_SECS,
             'DELETE',
             query_parameters=params,
@@ -461,7 +459,7 @@ class S3CompatProvider(provider.BaseProvider):
         headers = {}
         params = {'uploadId': session_upload_id}
         list_url = functools.partial(
-            self.bucket.new_key(path.path).generate_url,
+            self.bucket.new_key(path.full_path).generate_url,
             settings.TEMP_URL_SECS,
             'GET',
             query_parameters=params,
@@ -505,7 +503,7 @@ class S3CompatProvider(provider.BaseProvider):
         }
         params = {'uploadId': session_upload_id}
         complete_url = functools.partial(
-            self.bucket.new_key(path.path).generate_url,
+            self.bucket.new_key(path.full_path).generate_url,
             settings.TEMP_URL_SECS,
             'POST',
             query_parameters=params,
@@ -526,7 +524,7 @@ class S3CompatProvider(provider.BaseProvider):
     async def delete(self, path, confirm_delete=0, **kwargs):
         """Deletes the key at the specified path
 
-        :param str path: The path of the key to delete
+        :param path: ( :class:`.WaterButlerPath` ) The path of the key to delete
         :param int confirm_delete: Must be 1 to confirm root folder delete
         """
         if path.is_root:
@@ -640,7 +638,7 @@ class S3CompatProvider(provider.BaseProvider):
     async def revisions(self, path, **kwargs):
         """Get past versions of the requested key
 
-        :param str path: The path to a key
+        :param path: ( :class:`.WaterButlerPath` ) The path to a key
         :rtype list:
         """
         prefix = path.full_path.lstrip('/')  # '/' -> '', '/A/B' -> 'A/B'
@@ -697,7 +695,7 @@ class S3CompatProvider(provider.BaseProvider):
 
     async def create_folder(self, path, folder_precheck=True, **kwargs):
         """
-        :param str path: The path to create a folder at
+        :param path: ( :class:`.WaterButlerPath` ) The path to create a folder at
         """
         WaterButlerPath.validate_folder(path)
 

@@ -258,6 +258,7 @@ class TestCreateFolder:
         handler.provider.create_folder = MockCoroutine(return_value=mock_folder_metadata)
         handler.target_path = WaterButlerPath('/apath/')
         handler.set_status = mock.Mock()
+        handler.root_path = '123456789'
 
         await handler.create_folder()
 
@@ -277,6 +278,7 @@ class TestUploadFile:
         handler.resource = '3rqws'
         handler.uploader.set_result((mock_file_metadata, True))
         handler.set_status = mock.Mock()
+        handler.root_path = '123456789'
 
         await handler.upload_file()
 
@@ -284,7 +286,7 @@ class TestUploadFile:
         assert handler.writer.close.called
         handler.set_status.assert_called_once_with(201)
         handler.write.assert_called_once_with({
-            'data': mock_file_metadata.json_api_serialized('3rqws')
+            'data': mock_file_metadata.json_api_serialized('3rqws', root_path = '123456789')
         })
 
     @pytest.mark.asyncio
@@ -294,6 +296,7 @@ class TestUploadFile:
         handler.resource = '3rqws'
         handler.uploader.set_result((mock_file_metadata, False))
         handler.set_status = mock.Mock()
+        handler.root_path = '123456789'
 
         await handler.upload_file()
 
@@ -301,5 +304,5 @@ class TestUploadFile:
         assert handler.writer.close.called
         assert handler.set_status.called is False
         handler.write.assert_called_once_with({
-            'data': mock_file_metadata.json_api_serialized('3rqws')
+            'data': mock_file_metadata.json_api_serialized('3rqws', root_path = '123456789')
         })

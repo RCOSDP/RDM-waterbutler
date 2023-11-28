@@ -52,6 +52,7 @@ class TestProviderHandler:
     async def test_prepare_stream(self, http_request):
 
         handler = mock_handler(http_request)
+        handler.root_path = '123456789'
         handler.target_path = WaterButlerPath('/file')
         await handler.prepare_stream()
 
@@ -70,6 +71,7 @@ class TestProviderHandler:
     async def test_get_folder(self, http_request):
 
         handler = mock_handler(http_request)
+        handler.root_path = '123456789'
         handler.path = WaterButlerPath('/folder/')
         handler.get_folder = MockCoroutine()
 
@@ -81,6 +83,7 @@ class TestProviderHandler:
     async def test_get_file(self, http_request):
 
         handler = mock_handler(http_request)
+        handler.root_path = '123456789'
         handler.path = WaterButlerPath('/file')
         handler.get_file = MockCoroutine()
 
@@ -92,6 +95,7 @@ class TestProviderHandler:
     async def test_put_file(self, http_request):
 
         handler = mock_handler(http_request)
+        handler.root_path = '123456789'
         handler.target_path = WaterButlerPath('/file')
         handler.upload_file = MockCoroutine()
 
@@ -103,6 +107,7 @@ class TestProviderHandler:
     async def test_put_folder(self, http_request):
 
         handler = mock_handler(http_request)
+        handler.root_path = '123456789'
         handler.target_path = WaterButlerPath('/folder/')
         handler.create_folder = MockCoroutine()
 

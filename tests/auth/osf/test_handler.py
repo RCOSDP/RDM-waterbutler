@@ -88,7 +88,8 @@ class TestOsfAuthHandler(ServerTestCase):
                         'origin': None,
                         'uri': settings.API_URL,
                         'user_agent': None
-                    }
+                    },
+                    'callback_log': True
                 }, cookie=None, view_only=None)
             else:
                 self.handler.build_payload.assert_called_with({
@@ -102,7 +103,8 @@ class TestOsfAuthHandler(ServerTestCase):
                         'origin': None,
                         'uri': settings.API_URL,
                         'user_agent': None
-                    }
+                    },
+                    'callback_log': True
                 }, cookie=None, view_only=None)
 
 

@@ -100,7 +100,6 @@ class OneDriveProvider(provider.BaseProvider):
         logger.debug('validate_v1_path self::{} path::{} kwargs::{}'.format(repr(self),
                                                                             path, kwargs))
 
-        self.path = path
         if path == '/':
             return OneDrivePath(path, _ids=[self.folder])
 
@@ -140,7 +139,13 @@ class OneDriveProvider(provider.BaseProvider):
                 self.dont_escape_these
             )
 
-            if not data['parentReference']['path'].startswith(base_full_path):
+            # Ensure data['parentReference']['path'] is quoted to correctly compare with base_full_path
+            data_full_path = urlparse.quote(
+                urlparse.unquote(data['parentReference']['path']),
+                self.dont_escape_these
+            )
+
+            if not data_full_path.startswith(base_full_path):
                 # the requested file is NOT a child of self.folder
                 raise exceptions.NotFoundError(path)
 
@@ -150,7 +155,6 @@ class OneDriveProvider(provider.BaseProvider):
         return od_path
 
     async def validate_path(self, path: str, **kwargs) -> OneDrivePath:
-        self.path = path
         logger.debug('validate_path self::{} path::{} kwargs::{}'.format(repr(self), path, kwargs))
 
         if path == '/':
@@ -187,7 +191,13 @@ class OneDriveProvider(provider.BaseProvider):
                 self.dont_escape_these
             )
 
-            if not data['parentReference']['path'].startswith(base_full_path):
+            # Ensure data['parentReference']['path'] is quoted to correctly compare with base_full_path
+            data_full_path = urlparse.quote(
+                urlparse.unquote(data['parentReference']['path']),
+                self.dont_escape_these
+            )
+
+            if not data_full_path.startswith(base_full_path):
                 # the requested file is NOT a child of self.folder
                 raise exceptions.NotFoundError(path)  # TESTME
 
@@ -326,13 +336,21 @@ class OneDriveProvider(provider.BaseProvider):
 
         download_url = None
         if revision:
+            # Fix OneDrive Business: download file by revisions
             items = await self._revisions_json(path)
-            for item in items['value']:
+            for index, item in enumerate(items['value']):
                 if item['id'] == revision:
-                    try:
-                        download_url = item['@microsoft.graph.downloadUrl']
-                    except KeyError:
-                        raise exceptions.UnexportableFileTypeError(str(path))
+                    if index == 0:
+                        # Latest version: same as download file without revision param
+                        metadata = await self.metadata(path)
+                        logger.debug('download metadata::{}'.format(json.dumps(metadata.raw)))
+                        if metadata.package_type == 'oneNote':
+                            raise exceptions.UnexportableFileTypeError(str(path))
+                        download_url = metadata.download_url
+                    else:
+                        # Previous version: download file via API /drives/{drive-id}/items/{item-id}/versions/{version-id}/content
+                        path_segments = (*path.api_identifier, 'versions', revision, 'content')
+                        download_url = self._build_drive_url(*path_segments)
                     break
         else:
             metadata = await self.metadata(path, revision=revision)
@@ -662,15 +680,17 @@ class OneDriveProvider(provider.BaseProvider):
         :rtype: OneDriveFileMetadata
         :raises: :class:`waterbutler.core.exceptions.UploadError`
         """
-        url = '{}:/{}:/content'.format(
-            self._build_drive_url(*path.parent.api_identifier),
-            path.name,
+        url = self._build_drive_url(
+            *path.parent.api_identifier[0:-1],
+            '{}:'.format(path.parent.api_identifier[-1]),
+            '{}:'.format(path.name),
+            'content'
         )
         logger.debug("_upload_empty_file url::{}".format(url))
         resp = await self.make_request(
             'PUT',
             url,
-            expects=(201, ),
+            expects=(200, 201, ),
             throws=exceptions.UploadError,
         )
         logger.debug('_upload_empty_file resp::{}'.format(repr(resp)))
@@ -691,9 +711,11 @@ class OneDriveProvider(provider.BaseProvider):
         :rtype: OneDriveFileMetadata
         :raises: :class:`waterbutler.core.exceptions.UploadError`
         """
-        url = '{}:/{}:/createUploadSession'.format(
-            self._build_drive_url(*path.parent.api_identifier),
-            path.name,
+        url = self._build_drive_url(
+            *path.parent.api_identifier[0:-1],
+            '{}:'.format(path.parent.api_identifier[-1]),
+            '{}:'.format(path.name),
+            'createUploadSession'
         )
         logger.debug("_resumed_upload start url::{}".format(url))
         resp = await self.make_request(
@@ -735,7 +757,7 @@ class OneDriveProvider(provider.BaseProvider):
                 upload_url,
                 headers=headers,
                 data=chunk,
-                expects=(201, 202, ),
+                expects=(200, 201, 202, ),
                 throws=exceptions.UploadError,
                 no_auth_header=True,
             )

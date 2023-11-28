@@ -53,9 +53,10 @@ class TestMetadataMixin:
         # metadata of the actual folder. This should be true of all providers.
 
         handler = mock_handler(http_request)
+        handler.root_path = '123456789'
         handler.provider.metadata = MockCoroutine(return_value=mock_folder_children)
 
-        serialized_data = [x.json_api_serialized(handler.resource) for x in mock_folder_children]
+        serialized_data = [x.json_api_serialized(handler.resource, root_path='123456789') for x in mock_folder_children]
 
         await handler.get_folder()
 
@@ -66,6 +67,7 @@ class TestMetadataMixin:
         # The get_folder method expected behavior is to return folder children's metadata, not the
         # metadata of the actual folder. This should be true of all providers.
         handler = mock_handler(http_request)
+        handler.root_path = '123456789'
         handler.request.query_arguments['next_token'] = [b'']
         handler.provider = provider_s3
         handler.write = mock.Mock()
@@ -83,6 +85,7 @@ class TestMetadataMixin:
         # The get_folder method expected behavior is to return folder children's metadata, not the
         # metadata of the actual folder. This should be true of all providers.
         handler = mock_handler(http_request)
+        handler.root_path = '123456789'
         handler.request.query_arguments['next_token'] = [b'']
         handler.provider = provider_s3_compat
         handler.write = mock.Mock()
@@ -100,6 +103,7 @@ class TestMetadataMixin:
         # Including 'zip' in the query params should trigger the download_as_zip method
 
         handler = mock_handler(http_request)
+        handler.root_path = '123456789'
         handler.download_folder_as_zip = MockCoroutine()
         handler.request.query_arguments['zip'] = ''
 
@@ -111,6 +115,7 @@ class TestMetadataMixin:
     async def test_get_file_metadata(self, http_request):
 
         handler = mock_handler(http_request)
+        handler.root_path = '123456789'
         handler.file_metadata = MockCoroutine()
         handler.request.query_arguments['meta'] = ''
 
@@ -125,6 +130,7 @@ class TestMetadataMixin:
         # clarity.
 
         handler = mock_handler(http_request)
+        handler.root_path = '123456789'
         handler.get_file_revisions = MockCoroutine()
         handler.request.query_arguments[query_param] = ''
 
@@ -136,6 +142,7 @@ class TestMetadataMixin:
     async def test_get_file_download_file(self, http_request):
 
         handler = mock_handler(http_request)
+        handler.root_path = '123456789'
         handler.download_file = MockCoroutine()
         await handler.get_file()
 
@@ -242,18 +249,20 @@ class TestMetadataMixin:
     async def test_file_metadata(self, http_request, mock_file_metadata):
 
         handler = mock_handler(http_request)
+        handler.root_path = '123456789'
         handler.provider.metadata = MockCoroutine(return_value=mock_file_metadata)
 
         await handler.file_metadata()
 
         handler.write.assert_called_once_with({
-            'data': mock_file_metadata.json_api_serialized(handler.resource)
+            'data': mock_file_metadata.json_api_serialized(handler.resource, root_path = '123456789')
         })
 
     @pytest.mark.asyncio
     async def test_file_metadata_version(self, http_request, mock_file_metadata):
 
         handler = mock_handler(http_request)
+        handler.root_path = '123456789'
         handler.provider.metadata = MockCoroutine(return_value=mock_file_metadata)
         handler.requested_version = 'version id'
 
@@ -261,13 +270,14 @@ class TestMetadataMixin:
 
         handler.provider.metadata.assert_called_once_with(handler.path, revision='version id')
         handler.write.assert_called_once_with({
-            'data': mock_file_metadata.json_api_serialized(handler.resource)
+            'data': mock_file_metadata.json_api_serialized(handler.resource, root_path = '123456789')
         })
 
     @pytest.mark.asyncio
     async def test_get_file_revisions_raw(self, http_request, mock_revision_metadata):
 
         handler = mock_handler(http_request)
+        handler.root_path = '123456789'
         handler.provider.revisions = MockCoroutine(return_value=mock_revision_metadata)
 
         await handler.get_file_revisions()
