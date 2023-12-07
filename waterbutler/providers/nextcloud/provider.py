@@ -109,7 +109,7 @@ class NextcloudProvider(provider.BaseProvider):
         full_path = WaterButlerPath(path, prepend=self.folder)
 
         response = await self.make_request('PROPFIND',
-            self._webdav_url_ + full_path.full_path.replace(' ', '%20'),
+            self._webdav_url_ + full_path.full_path,
             expects=(200, 207, 404),
             throws=exceptions.MetadataError,
             auth=self._auth,
@@ -177,7 +177,7 @@ class NextcloudProvider(provider.BaseProvider):
         if revision is None:
             download_resp = await self.make_request(
                 'GET',
-                self._webdav_url_ + path.full_path.replace(' ', '%20'),
+                self._webdav_url_ + path.full_path,
                 range=range,
                 expects=(200, 206,),
                 throws=exceptions.DownloadError,
@@ -214,7 +214,7 @@ class NextcloudProvider(provider.BaseProvider):
 
         response = await self.make_request(
             'PUT',
-            self._webdav_url_ + path.full_path.replace(' ', '%20'),
+            self._webdav_url_ + path.full_path,
             data=stream,
             headers={'Content-Length': str(stream.size)},
             expects=(201, 204,),
@@ -234,7 +234,7 @@ class NextcloudProvider(provider.BaseProvider):
         """
         delete_resp = await self.make_request(
             'DELETE',
-            self._webdav_url_ + path.full_path.replace(' ', '%20'),
+            self._webdav_url_ + path.full_path,
             expects=(204,),
             throws=exceptions.DeleteError,
             auth=self._auth,
@@ -267,7 +267,7 @@ class NextcloudProvider(provider.BaseProvider):
             * 207: Multipart response
         """
         response = await self.make_request('PROPFIND',
-            self._webdav_url_ + path.full_path.replace(' ', '%20'),
+            self._webdav_url_ + path.full_path,
             expects=(204, 207),
             throws=exceptions.MetadataError,
             auth=self._auth,
@@ -310,7 +310,7 @@ class NextcloudProvider(provider.BaseProvider):
         query = '<?xml version="1.0" encoding="UTF-8"?> <d:propfind xmlns:d="DAV:" xmlns:nc="http://nextcloud.org/ns" > <d:prop xmlns:oc="http://owncloud.org/ns"> <d:getlastmodified/> <d:getcontentlength/> <d:resourcetype/> <d:getetag/> <d:getcontenttype/> <oc:fileid/>  </d:prop> </d:propfind>'
 
         response = await self.make_request('PROPFIND',
-            self._webdav_url_ + path.full_path.replace(' ', '%20'),
+            self._webdav_url_ + path.full_path,
             data=query,
             expects=(204, 207),
             throws=exceptions.MetadataError,
@@ -445,12 +445,12 @@ class NextcloudProvider(provider.BaseProvider):
 
         resp = await self.make_request(
             operation,
-            self._webdav_url_ + src_path.full_path.replace(' ', '%20'),
+            self._webdav_url_ + src_path.full_path,
             expects=(201, 204),  # WebDAV MOVE/COPY: 201 = Created, 204 = Updated existing
             throws=exceptions.IntraCopyError,
             auth=self._auth,
             connector=self.connector(),
-            headers={'Destination': '/remote.php/webdav' + dest_path.full_path.replace(' ', '%20')}
+            headers={'Destination': '/remote.php/webdav' + dest_path.full_path}
         )
         await resp.release()
 
