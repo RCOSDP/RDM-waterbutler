@@ -51,6 +51,7 @@ class LogPayload:
                 'name': self.path.name,
                 'materialized': self.path.materialized_path,
                 'extra': self.path.extra,
+                'old_root_id': self.path.parts[0].identifier,
             })
         else:
             payload.update(self.metadata.serialized())

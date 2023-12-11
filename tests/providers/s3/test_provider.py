@@ -45,6 +45,7 @@ from tests.providers.s3.fixtures import (auth,
                                          folder_single_item_metadata,
                                          file_metadata_headers_object,
                                          )
+from hmac import compare_digest
 
 
 @pytest.fixture
@@ -164,6 +165,10 @@ def list_upload_chunks_body(parts_metadata):
 
 def build_folder_params(path):
     return {'prefix': path.path, 'delimiter': '/'}
+
+
+def build_folder_params_with_max_key(path):
+    return {'prefix': path.path, 'delimiter': '/', 'max-keys': '1000'}
 
 
 class TestRegionDetection:
@@ -1014,10 +1019,17 @@ class TestMetadata:
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
+    async def test_handle_data(self, provider):
+        data = ['txt001.txt', 'abc']
+        result, token = provider.handle_data(data)
+        assert compare_digest(token, 'abc')
+
+    @pytest.mark.asyncio
+    @pytest.mark.aiohttpretty
     async def test_metadata_folder(self, provider, folder_metadata, mock_time):
         path = WaterButlerPath('/darp/')
         url = provider.bucket.generate_url(100)
-        params = build_folder_params(path)
+        params = build_folder_params_with_max_key(path)
         aiohttpretty.register_uri('GET', url, params=params, body=folder_metadata,
                                   headers={'Content-Type': 'application/xml'})
 
@@ -1032,17 +1044,54 @@ class TestMetadata:
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
+    async def test_metadata_have_next_token(self, provider, folder_metadata, mock_time):
+        path = WaterButlerPath('/darp/')
+        url = provider.bucket.generate_url(100)
+        params = build_folder_params_with_max_key(path)
+
+        aiohttpretty.register_uri('GET', url, params=params, body=folder_metadata,
+                                  headers={'Content-Type': 'application/xml'})
+
+        result = await provider.metadata(path, revision=None, next_token='')
+
+        assert isinstance(result, list)
+        assert len(result) == 3
+        assert result[0].name == '   photos'
+        assert result[1].name == 'my-image.jpg'
+        assert result[2].extra['md5'] == '1b2cf535f27731c974343645a3985328'
+
+    @pytest.mark.asyncio
+    @pytest.mark.aiohttpretty
+    async def test_metadata_folder_have_next_token(self, provider, folder_metadata, mock_time):
+        path = WaterButlerPath('/darp/')
+        url = provider.bucket.generate_url(100)
+        params = build_folder_params_with_max_key(path)
+
+        aiohttpretty.register_uri('GET', url, params=params, body=folder_metadata,
+                                  headers={'Content-Type': 'application/xml'})
+
+        result = await provider._metadata_folder(path, next_token='')
+
+        assert isinstance(result, list)
+        assert len(result) == 3
+        assert result[0].name == '   photos'
+        assert result[1].name == 'my-image.jpg'
+        assert result[2].extra['md5'] == '1b2cf535f27731c974343645a3985328'
+        assert result[2].extra['hashes']['md5'] == '1b2cf535f27731c974343645a3985328'
+
+    @pytest.mark.asyncio
+    @pytest.mark.aiohttpretty
     async def test_metadata_folder_self_listing(self, provider, folder_and_contents, mock_time):
         path = WaterButlerPath('/thisfolder/')
         url = provider.bucket.generate_url(100)
-        params = build_folder_params(path)
+        params = build_folder_params_with_max_key(path)
         aiohttpretty.register_uri('GET', url, params=params, body=folder_and_contents)
 
         result = await provider.metadata(path)
 
         assert isinstance(result, list)
         assert len(result) == 2
-        for fobj in result:
+        for fobj in result[:-1]:
             assert fobj.name != path.path
 
     @pytest.mark.asyncio
@@ -1050,7 +1099,7 @@ class TestMetadata:
     async def test_folder_metadata_folder_item(self, provider, folder_item_metadata, mock_time):
         path = WaterButlerPath('/')
         url = provider.bucket.generate_url(100)
-        params = build_folder_params(path)
+        params = build_folder_params_with_max_key(path)
         aiohttpretty.register_uri('GET', url, params=params, body=folder_item_metadata,
                                   headers={'Content-Type': 'application/xml'})
 
@@ -1067,7 +1116,7 @@ class TestMetadata:
         metadata_url = provider.bucket.new_key(path.path).generate_url(100, 'HEAD')
 
         url = provider.bucket.generate_url(100)
-        params = build_folder_params(path)
+        params = build_folder_params_with_max_key(path)
         aiohttpretty.register_uri('GET', url, params=params, body=folder_empty_metadata,
                                   headers={'Content-Type': 'application/xml'})
 
@@ -1186,7 +1235,7 @@ class TestCreateFolder:
     async def test_raise_409(self, provider, folder_metadata, mock_time):
         path = WaterButlerPath('/alreadyexists/')
         url = provider.bucket.generate_url(100, 'GET')
-        params = build_folder_params(path)
+        params = build_folder_params_with_max_key(path)
         aiohttpretty.register_uri('GET', url, params=params, body=folder_metadata,
                                   headers={'Content-Type': 'application/xml'})
 
@@ -1210,10 +1259,21 @@ class TestCreateFolder:
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
+    async def test_create_folder_with_folder_precheck_is_false(self, provider, mock_time):
+        path = WaterButlerPath('/alreadyexists')
+
+        with pytest.raises(exceptions.CreateFolderError) as e:
+            await provider.create_folder(path, folder_precheck=False)
+
+        assert e.value.code == 400
+        assert e.value.message == 'Path must be a directory'
+
+    @pytest.mark.asyncio
+    @pytest.mark.aiohttpretty
     async def test_errors_out(self, provider, mock_time):
         path = WaterButlerPath('/alreadyexists/')
         url = provider.bucket.generate_url(100, 'GET')
-        params = build_folder_params(path)
+        params = build_folder_params_with_max_key(path)
         create_url = provider.bucket.new_key(path.path).generate_url(100, 'PUT')
 
         aiohttpretty.register_uri('GET', url, params=params, status=404)
@@ -1229,7 +1289,7 @@ class TestCreateFolder:
     async def test_errors_out_metadata(self, provider, mock_time):
         path = WaterButlerPath('/alreadyexists/')
         url = provider.bucket.generate_url(100, 'GET')
-        params = build_folder_params(path)
+        params = build_folder_params_with_max_key(path)
 
         aiohttpretty.register_uri('GET', url, params=params, status=403)
 
@@ -1243,7 +1303,7 @@ class TestCreateFolder:
     async def test_creates(self, provider, mock_time):
         path = WaterButlerPath('/doesntalreadyexists/')
         url = provider.bucket.generate_url(100, 'GET')
-        params = build_folder_params(path)
+        params = build_folder_params_with_max_key(path)
         create_url = provider.bucket.new_key(path.path).generate_url(100, 'PUT')
 
         aiohttpretty.register_uri('GET', url, params=params, status=404)
@@ -1333,8 +1393,8 @@ class TestOperations:
         file_path = WaterButlerPath('/my-image.jpg')
         folder_path = WaterButlerPath('/folder/', folder=True)
 
-        assert provider.can_intra_move(provider)
-        assert provider.can_intra_move(provider, file_path)
+        assert not provider.can_intra_move(provider)
+        assert not provider.can_intra_move(provider, file_path)
         assert not provider.can_intra_move(provider, folder_path)
 
     def test_can_intra_copy(self, provider):
@@ -1342,8 +1402,8 @@ class TestOperations:
         file_path = WaterButlerPath('/my-image.jpg')
         folder_path = WaterButlerPath('/folder/', folder=True)
 
-        assert provider.can_intra_copy(provider)
-        assert provider.can_intra_copy(provider, file_path)
+        assert not provider.can_intra_copy(provider)
+        assert not provider.can_intra_copy(provider, file_path)
         assert not provider.can_intra_copy(provider, folder_path)
 
     def test_can_duplicate_names(self, provider):

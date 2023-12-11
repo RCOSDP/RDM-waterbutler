@@ -63,6 +63,11 @@ def mock_folder_children():
     return [MockFolderMetadata(), MockFileMetadata(), MockFileMetadata()]
 
 
+@pytest.fixture()
+def mock_folder_children_provider_s3():
+    return [MockFolderMetadata(), 'aaaa']
+
+
 @pytest.fixture
 def patch_auth_handler(monkeypatch, handler_auth):
     mock_auth_handler = MockCoroutine(return_value=handler_auth)
@@ -220,6 +225,20 @@ def celery_dest_copy_params_root():
 
 
 @pytest.fixture
+def celery_dest_copy_params_location():
+    return {
+            'nid': 'export_location',
+            'path': WaterButlerPath('/test_path/', prepend=None),
+            'provider': {
+                'credentials': {},
+                'name': 'MockProvider',
+                'settings': {},
+                'auth': {}
+            }
+    }
+
+
+@pytest.fixture
 def handler_auth():
     with open(os.path.join(os.path.dirname(__file__), 'fixtures/fixtures.json'), 'r') as fp:
         return json.load(fp)['hander_auth']
@@ -235,3 +254,27 @@ def serialized_metadata():
 def serialized_request():
     with open(os.path.join(os.path.dirname(__file__), 'fixtures/fixtures.json'), 'r') as fp:
         return json.load(fp)['serialized_request']
+
+
+@pytest.fixture
+def auth():
+    return {
+        'name': 'cat',
+        'email': 'cat@cat.com',
+    }
+
+
+@pytest.fixture
+def credentials():
+    return {
+        'access_key': 'Dont dead',
+        'secret_key': 'open inside',
+    }
+
+
+@pytest.fixture
+def settings():
+    return {
+        'bucket': 'that kerning',
+        'encrypt_uploads': False
+    }

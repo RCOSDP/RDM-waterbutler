@@ -10,6 +10,8 @@ from waterbutler.core import remote_logging
 from waterbutler.server.auth import AuthHandler
 from waterbutler.core.utils import make_provider
 from waterbutler.constants import DEFAULT_CONFLICT
+from waterbutler.auth.osf.handler import EXPORT_DATA_FAKE_NODE_ID
+from waterbutler.tasks.settings import SYNCHRONOUS_TIMEOUT
 
 auth_handler = AuthHandler(settings.AUTH_HANDLERS)
 
@@ -79,6 +81,9 @@ class MoveCopyMixin:
                 raise exceptions.InvalidParameters('"rename" field is required for renaming')
             provider_action = 'move'
 
+        if self.resource == EXPORT_DATA_FAKE_NODE_ID:
+            self.location_id = self.get_query_argument('location_id', default=None)
+
         self.auth = await auth_handler.get(
             self.resource,
             provider,
@@ -87,6 +92,7 @@ class MoveCopyMixin:
             auth_type=AuthType.SOURCE,
             path=self.path,
             version=self.requested_version,
+            location_id=self.location_id,
         )
         self.provider = make_provider(
             provider,
@@ -118,12 +124,18 @@ class MoveCopyMixin:
 
             # Note: attached to self so that _send_hook has access to these
             self.dest_resource = self.json.get('resource', self.resource)
+
+            if self.dest_resource == EXPORT_DATA_FAKE_NODE_ID:
+                self.location_id = self.get_query_argument('location_id', default=None)
+
             self.dest_auth = await auth_handler.get(
                 self.dest_resource,
                 self.json.get('provider', self.provider.NAME),
                 self.request,
                 action=auth_action,
                 auth_type=AuthType.DESTINATION,
+                path=path,
+                location_id=self.location_id,
             )
             self.dest_provider = make_provider(
                 self.json.get('provider', self.provider.NAME),
@@ -136,13 +148,25 @@ class MoveCopyMixin:
         if not getattr(self.provider, 'can_intra_' + provider_action)(self.dest_provider, self.path):
             # this weird signature syntax courtesy of py3.4 not liking trailing commas on kwargs
             conflict = self.json.get('conflict', DEFAULT_CONFLICT)
+            task_kwargs = {}
+            if provider_action == 'copy':
+                # Only copy API has additional 'version' argument
+                task_kwargs = {'version': self.requested_version}
             result = await getattr(tasks, provider_action).adelay(
                 rename=self.json.get('rename'),
                 conflict=conflict,
                 request=remote_logging._serialize_request(self.request),
-                *self.build_args()
+                *self.build_args(),
+                **task_kwargs,
             )
-            metadata, created = await tasks.wait_on_celery(result)
+            synchronous = self.json.get('synchronous', 'false')
+            synchronous = True if isinstance(synchronous, bool) and synchronous is True else False
+            if synchronous:
+                # Use SYNCHRONOUS_TIMEOUT value for synchronous processes
+                metadata, created = await tasks.wait_on_celery(result, timeout=SYNCHRONOUS_TIMEOUT)
+            else:
+                # Use default timeout value for asynchronous processes
+                metadata, created = await tasks.wait_on_celery(result)
         else:
             metadata, created = (
                 await tasks.backgrounded(

@@ -114,6 +114,7 @@ def test_return_values(providers, bundles, callback, src_path, dest_path, mock_t
         'provider': src.NAME,
         'kind': 'file',
         'extra': {},
+        'old_root_id': None,
     }
 
     assert data['destination'] == {

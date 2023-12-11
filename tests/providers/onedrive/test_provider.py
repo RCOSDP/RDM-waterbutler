@@ -1,4 +1,5 @@
 import pytest
+from urllib import parse as urlparse
 import aiohttpretty
 
 from http import HTTPStatus
@@ -412,7 +413,7 @@ class TestCRUD:
         upload_url = 'https://osf.dummy.com'
         create_session_url = '{}:/{}:/createUploadSession'.format(
             root_provider._build_drive_url(*file_path.parent.api_identifier),
-            file_path.name,
+            urlparse.quote(file_path.name),
         )
         aiohttpretty.register_json_uri('POST', create_session_url, status=HTTPStatus.OK, body={
             'uploadUrl': upload_url
@@ -429,6 +430,36 @@ class TestCRUD:
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
+    async def test_upload_as_mb_filename(self, root_provider, root_provider_fixtures, file_stream):
+
+        file_metadata = root_provider_fixtures['file_metadata']
+        file_name = '日本語.txt'
+        file_path = OneDrivePath('/{}'.format(file_name),
+                                 _ids=(root_provider_fixtures['root_id'], ))
+
+        upload_url = 'https://osf.dummy.com'
+        create_session_url = '{}:/{}:/createUploadSession'.format(
+            root_provider._build_drive_url(*file_path.parent.api_identifier),
+            urlparse.quote(file_path.name),
+        )
+        aiohttpretty.register_json_uri('POST', create_session_url, status=HTTPStatus.OK, body={
+            'uploadUrl': upload_url
+        })
+        aiohttpretty.register_json_uri('PUT', upload_url, status=HTTPStatus.CREATED, body=file_metadata)
+
+        result, created = await root_provider.upload(file_stream, file_path)
+        expected = OneDriveFileMetadata(file_metadata, file_path, root_provider.NAME)
+
+        assert created is True
+        assert result == expected
+        assert aiohttpretty.has_call(method='POST', uri=create_session_url)
+        assert aiohttpretty.has_call(method='PUT', uri=upload_url)
+        assert any([call['uri'].url.endswith(
+            '/{}:/createUploadSession'.format(urlparse.quote(file_path.name))
+        ) for call in aiohttpretty.calls]), [call['uri'].url for call in aiohttpretty.calls]
+
+    @pytest.mark.asyncio
+    @pytest.mark.aiohttpretty
     async def test_upload_empty_file(self, root_provider, root_provider_fixtures, empty_file_stream):
 
         file_metadata = root_provider_fixtures['file_metadata']
@@ -438,7 +469,7 @@ class TestCRUD:
 
         url = '{}:/{}:/content'.format(
             root_provider._build_drive_url(*file_path.parent.api_identifier),
-            file_path.name,
+            urlparse.quote(file_path.name),
         )
         aiohttpretty.register_json_uri('PUT', url, status=HTTPStatus.CREATED, body=file_metadata)
 
@@ -448,6 +479,31 @@ class TestCRUD:
         assert created is True
         assert result == expected
         assert aiohttpretty.has_call(method='PUT', uri=url)
+
+    @pytest.mark.asyncio
+    @pytest.mark.aiohttpretty
+    async def test_upload_empty_file_as_mb_filename(self, root_provider, root_provider_fixtures, empty_file_stream):
+
+        file_metadata = root_provider_fixtures['file_metadata']
+        file_name = '日本語.txt'
+        file_path = OneDrivePath('/{}'.format(file_name),
+                                 _ids=(root_provider_fixtures['root_id'], ))
+
+        url = '{}:/{}:/content'.format(
+            root_provider._build_drive_url(*file_path.parent.api_identifier),
+            urlparse.quote(file_path.name),
+        )
+        aiohttpretty.register_json_uri('PUT', url, status=HTTPStatus.CREATED, body=file_metadata)
+
+        result, created = await root_provider.upload(empty_file_stream, file_path)
+        expected = OneDriveFileMetadata(file_metadata, file_path, root_provider.NAME)
+
+        assert created is True
+        assert result == expected
+        assert aiohttpretty.has_call(method='PUT', uri=url)
+        assert any([call['uri'].url.endswith(
+            '/{}:/content'.format(urlparse.quote(file_path.name))
+        ) for call in aiohttpretty.calls]), [call['uri'].url for call in aiohttpretty.calls]
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty

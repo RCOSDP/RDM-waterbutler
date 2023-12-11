@@ -104,10 +104,10 @@ class S3Provider(provider.BaseProvider):
         return True
 
     def can_intra_copy(self, dest_provider, path=None):
-        return type(self) == type(dest_provider) and not getattr(path, 'is_dir', False)
+        return False
 
     def can_intra_move(self, dest_provider, path=None):
-        return type(self) == type(dest_provider) and not getattr(path, 'is_dir', False)
+        return False
 
     async def intra_copy(self, dest_provider, source_path, dest_path):
         """Copy key from one S3 bucket to another. The credentials specified in
@@ -637,9 +637,18 @@ class S3Provider(provider.BaseProvider):
         await self._check_region()
 
         if path.is_dir:
+            if 'next_token' in kwargs:
+                return await self._metadata_folder(path, kwargs['next_token'])
             return (await self._metadata_folder(path))
 
         return (await self._metadata_file(path, revision=revision))
+
+    def handle_data(self, data):
+        token = None
+        if not isinstance(data, S3FileMetadataHeaders):
+            token = data.pop()
+
+        return data, token or ''
 
     async def create_folder(self, path, folder_precheck=True, **kwargs):
         """
@@ -682,10 +691,13 @@ class S3Provider(provider.BaseProvider):
         await resp.release()
         return S3FileMetadataHeaders(path.path, resp.headers)
 
-    async def _metadata_folder(self, path):
+    async def _metadata_folder(self, path, next_token=None):
         await self._check_region()
 
-        params = {'prefix': path.path, 'delimiter': '/'}
+        params = {'prefix': path.path, 'delimiter': '/', 'max-keys': '1000'}
+        if next_token is not None:
+            params['marker'] = next_token
+
         resp = await self.make_request(
             'GET',
             functools.partial(self.bucket.generate_url, settings.TEMP_URL_SECS, 'GET', query_parameters=params),
@@ -698,6 +710,7 @@ class S3Provider(provider.BaseProvider):
 
         parsed = xmltodict.parse(contents, strip_whitespace=False)['ListBucketResult']
 
+        next_token_string = parsed.get('NextMarker', '')
         contents = parsed.get('Contents', [])
         prefixes = parsed.get('CommonPrefixes', [])
 
@@ -733,6 +746,8 @@ class S3Provider(provider.BaseProvider):
             else:
                 items.append(S3FileMetadata(content))
 
+        if next_token_string:
+            items.append(next_token_string)
         return items
 
     async def _check_region(self):

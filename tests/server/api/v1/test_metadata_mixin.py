@@ -1,5 +1,6 @@
 import json
 
+import mock
 import pytest
 
 from tests.utils import MockCoroutine
@@ -8,7 +9,26 @@ from waterbutler.core.path import WaterButlerPath
 from tests.server.api.v1.utils import mock_handler
 from tests.server.api.v1.fixtures import (http_request, handler_auth, mock_stream,
                                           mock_partial_stream, mock_file_metadata,
-                                          mock_folder_children, mock_revision_metadata)
+                                          mock_folder_children, mock_revision_metadata,
+                                          mock_folder_children_provider_s3, auth, settings, credentials)
+from waterbutler.providers.s3 import S3Provider
+from waterbutler.providers.s3compat import S3CompatProvider
+
+
+@pytest.fixture
+def provider_s3(auth, credentials, settings):
+    provider = S3Provider(auth, credentials, settings)
+    provider._check_region = MockCoroutine()
+    return provider
+
+
+@pytest.fixture
+def provider_s3_compat(auth, credentials, settings):
+    provider = S3CompatProvider(auth, {'host': 'normalhost:8080',
+                                           'access_key': 'a',
+                                           'secret_key': 's'}, settings)
+    provider._check_region = MockCoroutine()
+    return provider
 
 
 class TestMetadataMixin:
@@ -40,6 +60,40 @@ class TestMetadataMixin:
         await handler.get_folder()
 
         handler.write.assert_called_once_with({'data': serialized_data})
+
+    @pytest.mark.asyncio
+    async def test_get_folder_with_next_token(self, http_request, provider_s3, mock_folder_children_provider_s3):
+        # The get_folder method expected behavior is to return folder children's metadata, not the
+        # metadata of the actual folder. This should be true of all providers.
+        handler = mock_handler(http_request)
+        handler.request.query_arguments['next_token'] = [b'']
+        handler.provider = provider_s3
+        handler.write = mock.Mock()
+        handler.provider.metadata = MockCoroutine(return_value=mock_folder_children_provider_s3)
+
+        await handler.get_folder()
+        call_args = handler.write.call_args[0][0]
+        assert isinstance(call_args, dict)
+        assert call_args['next_token'] == 'aaaa'
+        assert isinstance(call_args['next_token'], str)
+        assert isinstance(call_args['data'], list)
+
+    @pytest.mark.asyncio
+    async def test_get_folder_with_next_token(self, http_request, provider_s3_compat, mock_folder_children_provider_s3):
+        # The get_folder method expected behavior is to return folder children's metadata, not the
+        # metadata of the actual folder. This should be true of all providers.
+        handler = mock_handler(http_request)
+        handler.request.query_arguments['next_token'] = [b'']
+        handler.provider = provider_s3_compat
+        handler.write = mock.Mock()
+        handler.provider.metadata = MockCoroutine(return_value=mock_folder_children_provider_s3)
+
+        await handler.get_folder()
+        call_args = handler.write.call_args[0][0]
+        assert isinstance(call_args, dict)
+        assert call_args['next_token'] == 'aaaa'
+        assert isinstance(call_args['next_token'], str)
+        assert isinstance(call_args['data'], list)
 
     @pytest.mark.asyncio
     async def test_get_folder_download_as_zip(self, http_request,):
