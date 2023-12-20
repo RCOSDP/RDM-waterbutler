@@ -168,8 +168,7 @@ def move_copy_args():
                 'auth': {},
                 'settings': {}
             },
-            'path': '/test_path',
-            'root_path': '123456789'
+            'path': '/test_path'
         },
         {
             'nid': 'test_dest_resource',
@@ -178,8 +177,7 @@ def move_copy_args():
                 'name': 'MockProvider',
                 'auth': {},
                 'settings': {}
-            }, 'path': '/test_dest_path',
-            'root_path': '123456789'
+            }, 'path': '/test_dest_path'
         }
     )
 
@@ -217,6 +215,20 @@ def celery_dest_copy_params_root():
     return {
             'nid': 'test_source_resource',
             'path': WaterButlerPath('/', prepend=None),
+            'provider': {
+                'credentials': {},
+                'name': 'MockProvider',
+                'settings': {},
+                'auth': {}
+            }
+    }
+
+
+@pytest.fixture
+def celery_dest_copy_params_location():
+    return {
+            'nid': 'export_location',
+            'path': WaterButlerPath('/test_path/', prepend=None),
             'provider': {
                 'credentials': {},
                 'name': 'MockProvider',

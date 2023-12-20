@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 @core.celery_task
 async def move(src_bundle, dest_bundle, request=None, start_time=None, **kwargs):
+
     request = request or {}
     start_time = start_time or time.time()
 
@@ -38,9 +39,10 @@ async def move(src_bundle, dest_bundle, request=None, start_time=None, **kwargs)
         destination = LogPayload(
             dest_bundle['nid'], dest_provider, path=dest_path, metadata=metadata
         )
+
         await remote_logging.wait_for_log_futures(
             'move', source=source, destination=destination, start_time=start_time,
-            errors=errors, request=request, api_version='celery', src_root_path=src_bundle.pop('root_path'), dest_root_path=dest_bundle.pop('root_path'),
+            errors=errors, request=request, api_version='celery',
         )
 
     return metadata, created

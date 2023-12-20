@@ -1,3 +1,4 @@
+import inspect  # noqa
 import logging
 import datetime
 
@@ -8,11 +9,13 @@ from aiohttp.client_exceptions import ClientError, ContentTypeError
 
 from waterbutler.core import exceptions
 from waterbutler.auth.osf import settings
+from waterbutler.utils import inspect_info  # noqa
 from waterbutler.core.auth import AuthType, BaseAuthHandler
 from waterbutler.settings import MFR_IDENTIFYING_HEADER
 
 
 JWE_KEY = jwe.kdf(settings.JWE_SECRET.encode(), settings.JWE_SALT.encode())
+EXPORT_DATA_FAKE_NODE_ID = 'export_location'
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +104,7 @@ class OsfAuthHandler(BaseAuthHandler):
         return payload
 
     async def get(self, resource, provider, request, action=None, auth_type=AuthType.SOURCE,
-                  path='', version=None, callback_log=True):
+                  path='', version=None, callback_log=True, location_id=None):
         """Used for v1"""
         method = request.method.lower()
 
@@ -165,6 +168,8 @@ class OsfAuthHandler(BaseAuthHandler):
             },
             'callback_log': callback_log
         }
+        if resource == EXPORT_DATA_FAKE_NODE_ID:
+            data['location_id'] = location_id
 
         payload = await self.make_request(
             self.build_payload(data, cookie=cookie, view_only=view_only),

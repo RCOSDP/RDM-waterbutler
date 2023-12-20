@@ -94,18 +94,14 @@ class CreateMixin:
             self.target_path = self.path
 
         # verify quota if it is osfstorage
-        if self.provider.NAME == 'osfstorage' or self.provider.NAME in settings.ADDON_METHOD_PROVIDER:
+        if self.provider.NAME == 'osfstorage':
             file_size = int(self.request.headers.get('Content-Length'))
-            self.provider.root_path = self.root_path
             quota = await self.provider.get_quota()
             if quota['used'] + file_size > quota['max']:
                 raise exceptions.NotEnoughQuotaError('You do not have enough available quota.')
 
     async def create_folder(self):
         self.metadata = await self.provider.create_folder(self.target_path)
-        # set root path to folder metada
-        if self.root_path:
-            self.metadata.root_path = self.root_path
         self.set_status(201)
         self.write({'data': self.metadata.json_api_serialized(self.resource)})
 
@@ -117,5 +113,5 @@ class CreateMixin:
         self.wsock.close()
         if created:
             self.set_status(201)
-        # set root path ro json api response
-        self.write({'data': self.metadata.json_api_serialized(self.resource, root_path=self.root_path)})
+
+        self.write({'data': self.metadata.json_api_serialized(self.resource)})

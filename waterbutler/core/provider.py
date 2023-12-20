@@ -1,6 +1,5 @@
 import abc
 import time
-import json
 import typing
 import asyncio
 import logging
@@ -14,7 +13,6 @@ import aiohttp
 from aiohttp.client import _RequestContextManager
 from yarl import URL
 
-from waterbutler.core import signing
 from waterbutler.core import streams
 from waterbutler.core import exceptions
 from waterbutler.core import path as wb_path
@@ -24,9 +22,10 @@ from waterbutler.core import metadata as wb_metadata
 from waterbutler.core.utils import ZipStreamGenerator
 from waterbutler.core.utils import RequestHandlerContext
 
+
 logger = logging.getLogger(__name__)
 _THROTTLES = weakref.WeakKeyDictionary()  # type: weakref.WeakKeyDictionary
-QUERY_METHODS = ('GET', 'DELETE')
+NO_URL_ENCODED_PROVIDERS = ['nextcloud', 'owncloud', 'nextcloudinstitutions']
 
 
 def throttle(concurrency=10, interval=1):
@@ -99,6 +98,7 @@ class BaseProvider(metaclass=abc.ABCMeta):
             ofter an OAuth 2 token
         :param settings: ( :class:`dict` ) Configuration settings for this provider,
             often folder or repo
+        :param retry_on: ( :class:`set` ) A set of HTTP status codes of failed requests that need to be retried
         :param is_celery_task: ( :class:`bool` ) Was this provider built inside a celery task?
         """
         self._retry_on = retry_on
@@ -120,10 +120,6 @@ class BaseProvider(metaclass=abc.ABCMeta):
         # The `.session_list` keeps track of all the sessions created for the provider instance so
         # that they can be properly closed upon instance destroy.
         self.session_list = []  # type: typing.List[aiohttp.ClientSession]
-
-        self.nid = settings.get('nid')
-        self.root_id = settings.get('rootId')
-        self.path = None
 
     def __del__(self):
         """
@@ -269,6 +265,8 @@ class BaseProvider(metaclass=abc.ABCMeta):
             raises an exception if the returned status code is not in it
         :keyword retry: ( :class:`int` ) An optional integer with default value 2 that determines
             how further to retry failed requests with the exponential back-off algorithm
+        :keyword force_retry_on: ( :class:`set` ) An optional set of integer that determines
+            status codes of failed requests that need to be retried
         :keyword throws: ( :class:`Exception` ) The exception to be raised from expects
         :return: The HTTP response
         :rtype: :class:`aiohttp.ClientResponse`
@@ -276,6 +274,7 @@ class BaseProvider(metaclass=abc.ABCMeta):
         :raises: :class:`.WaterButlerError` Raised if invalid HTTP method is provided
         """
 
+        force_retry_on = kwargs.pop('force_retry_on', set())
         kwargs['headers'] = self.build_headers(**kwargs.get('headers', {}))
         no_auth_header = kwargs.pop('no_auth_header', False)
         if no_auth_header:
@@ -293,7 +292,9 @@ class BaseProvider(metaclass=abc.ABCMeta):
         while retry >= 0:
             # Don't overwrite the callable ``url`` so that signed URLs are refreshed for every retry
             non_callable_url = url() if callable(url) else url
-            non_callable_url = URL(non_callable_url, encoded=True)
+            if self.NAME not in NO_URL_ENCODED_PROVIDERS:
+                # Fix storage 'nextcloud', 'owncloud', 'nextcloudinstitutions' return HTTP 400 bad request
+                non_callable_url = URL(non_callable_url, encoded=True)
             try:
                 self.provider_metrics.incr('requests.count')
                 # TODO: use a `dict` to select methods with either `lambda` or `functools.partial`
@@ -328,16 +329,18 @@ class BaseProvider(metaclass=abc.ABCMeta):
                 else:
                     raise exceptions.WaterButlerError('Unsupported HTTP method ...')
                 self.provider_metrics.incr('requests.tally.ok')
-                if expects and response.status not in expects:
+                if (retry > 0 and response.status in force_retry_on) or (expects and response.status not in expects):
                     unexpected = await exceptions.exception_from_response(response,
                                                                           error=throws, **kwargs)
                     raise unexpected
                 return response
             except throws as e:
                 self.provider_metrics.incr('requests.tally.nok')
-                if retry <= 0 or e.code not in self._retry_on:
+                if retry <= 0 or e.code not in force_retry_on.union(self._retry_on):
                     raise
-                await asyncio.sleep((1 + _retry - retry) * 2)
+                # Seconds equals twice the 'n' attempt
+                sleep_seconds = (1 + _retry - retry) * 2
+                await asyncio.sleep(sleep_seconds)
                 retry -= 1
 
     def request(self, *args, **kwargs):
@@ -410,7 +413,7 @@ class BaseProvider(metaclass=abc.ABCMeta):
                    src_path: wb_path.WaterButlerPath,
                    dest_path: wb_path.WaterButlerPath,
                    rename: str=None, conflict: str='replace',
-                   handle_naming: bool=True) \
+                   handle_naming: bool=True, version=None) \
             -> typing.Tuple[wb_metadata.BaseMetadata, bool]:
         args = (dest_provider, src_path, dest_path)
         kwargs = {'rename': rename, 'conflict': conflict, 'handle_naming': handle_naming}
@@ -445,10 +448,13 @@ class BaseProvider(metaclass=abc.ABCMeta):
         if src_path.is_dir:
             return await self._folder_file_op(self.copy, *args, **kwargs)  # type: ignore
 
-        download_stream = await self.download(src_path)
+        download_stream = await self.download(src_path, version=version)
 
         if getattr(download_stream, 'name', None):
             dest_path.rename(download_stream.name)
+
+        if hasattr(download_stream, '_size') and download_stream._size is None:
+            download_stream._size = 0
 
         return await dest_provider.upload(download_stream, dest_path)
 
@@ -859,52 +865,3 @@ class BaseProvider(metaclass=abc.ABCMeta):
     def __repr__(self):
         # Note: credentials are not included on purpose.
         return '<{}({}, {})>'.format(self.__class__.__name__, self.auth, self.settings)
-
-    def build_signed_url(self, method, url, data=None, params=None, ttl=100, **kwargs):
-        from waterbutler.providers.osfstorage import settings
-        signer = signing.Signer(settings.HMAC_SECRET, settings.HMAC_ALGORITHM)
-        if method.upper() in QUERY_METHODS:
-            signed = signing.sign_data(signer, params or {}, ttl=ttl)
-            params = signed
-        else:
-            signed = signing.sign_data(signer, json.loads(data or {}), ttl=ttl)
-            data = json.dumps(signed)
-
-        # Ensure url ends with a /
-        if not url.endswith('/'):
-            if '?' not in url:
-                url += '/'
-            elif url[url.rfind('?') - 1] != '/':
-                url = url.replace('?', '/?')
-
-        return url, data, params
-
-    async def make_signed_request(self, method, url, data=None, params=None, ttl=100, **kwargs):
-        url, data, params = self.build_signed_url(
-            method,
-            url,
-            data=data,
-            params=params,
-            ttl=ttl,
-            **kwargs
-        )
-        return await self.make_request(method, url, data=data, params=params, **kwargs)
-
-    async def get_quota(self):
-        """Get the quota information
-
-        If the creator of the project doesn't have enough quota, we invalidate the upload request.
-        """
-        resp = await self.make_signed_request(
-            'POST',
-            '{}/api/v1/project/{}/institution_storage_user_quota/'.format(wb_settings.OSF_URL, self.nid),
-            data=json.dumps({
-                'provider': self.NAME,
-                'path': self.root_id or self.path or '/'
-            }),
-            headers={'Content-Type': 'application/json'},
-            expects=(200, )
-        )
-        body = await resp.json()
-        await resp.release()
-        return body

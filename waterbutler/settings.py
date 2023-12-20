@@ -184,11 +184,3 @@ AIOHTTP_TIMEOUT = int(config.get('AIOHTTP_TIMEOUT', 3600))  # time in seconds
 
 OSF_URL = config.get('OSF_URL', 'http://192.168.168.167:5000')
 FILENAME_NORMALIZATION_RULE = config.get('FILENAME_NORMALIZATION_RULE', 'NFC')
-
-ADDON_METHOD_PROVIDER = [
-    'nextcloudinstitutions',
-    'dropboxbusiness',
-    's3compatinstitutions',
-    'onedrivebusiness',
-    'ociinstitutions',
-]

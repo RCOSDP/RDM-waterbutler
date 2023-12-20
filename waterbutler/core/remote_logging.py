@@ -9,6 +9,7 @@ import aiohttp
 
 from waterbutler import settings
 from waterbutler.core import utils
+from waterbutler.utils import inspect_info  # noqa
 from waterbutler.sizes import KBs, MBs, GBs
 from waterbutler.version import __version__
 from waterbutler.tasks import settings as task_settings
@@ -19,10 +20,9 @@ logger = logging.getLogger(__name__)
 
 @utils.async_retry(retries=5, backoff=5)
 async def log_to_callback(action, source=None, destination=None, start_time=None, errors=[],
-                          request={}, src_root_path=None, dest_root_path=None, ):
+                          request={}):
     """PUT a logging payload back to the callback given by the auth provider."""
-    logger.debug(f'Provider src root path is \'{src_root_path}\'')
-    logger.debug(f'Provider dest root path is \'{dest_root_path}\'')
+
     auth = getattr(destination, 'auth', source.auth)
     ref_url_domain = ''
     log_payload = {
@@ -51,13 +51,10 @@ async def log_to_callback(action, source=None, destination=None, start_time=None
 
     if action in ('move', 'copy'):
         log_payload['source'] = source.serialize()
-        log_payload['source']['root_path'] = src_root_path
         log_payload['destination'] = destination.serialize()
-        log_payload['destination']['root_path'] = dest_root_path
     else:
         log_payload['metadata'] = source.serialize()
         log_payload['provider'] = log_payload['metadata']['provider']
-        log_payload['root_path'] = src_root_path
 
     if action in ['download_file', 'download_zip']:
         is_mfr_render = (ref_url_domain == settings.MFR_DOMAIN or
@@ -217,11 +214,11 @@ async def _send_to_keen(payload, collection, project_id, write_key, action, doma
 
 
 def log_file_action(action, source, api_version, destination=None, request={},
-                    start_time=None, errors=None, bytes_downloaded=None, bytes_uploaded=None, src_root_path=None, dest_root_path=None):
+                    start_time=None, errors=None, bytes_downloaded=None, bytes_uploaded=None):
     """Kick off logging actions in the background. Returns array of asyncio.Tasks."""
     return [
         log_to_callback(action, source=source, destination=destination,
-                        start_time=start_time, errors=errors, request=request, src_root_path=src_root_path, dest_root_path=dest_root_path, ),
+                        start_time=start_time, errors=errors, request=request,),
         asyncio.ensure_future(
             log_to_keen(action, source=source, destination=destination,
                         errors=errors, request=request, api_version=api_version,
