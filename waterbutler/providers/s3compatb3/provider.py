@@ -320,9 +320,18 @@ class S3CompatB3Provider(provider.BaseProvider):
         :rtype: dict or list
         """
         if path.is_dir:
+            if 'next_token' in kwargs:
+                return await self._metadata_folder(path, kwargs['next_token'])
             return (await self._metadata_folder(path))
 
         return (await self._metadata_file(path, revision=revision))
+
+    def handle_data(self, data):
+        token = None
+        if not isinstance(data, S3CompatB3FileMetadataHeaders):
+            token = data.pop()
+
+        return data, token or ''
 
     async def create_folder(self, path, folder_precheck=True, **kwargs):
         """
@@ -349,11 +358,20 @@ class S3CompatB3Provider(provider.BaseProvider):
 
         return S3CompatB3FileMetadataHeaders(self, path.full_path, resp)
 
-    async def _metadata_folder(self, path):
+    async def _metadata_folder(self, path, next_token=None):
         logger.info('_metadata_folder: {}:'.format(path.full_path))
         prefix = path.full_path.lstrip('/')  # '/' -> '', '/A/B' -> 'A/B'
+        req_kwargs = {
+            'Bucket': self.bucket.name,
+            'Prefix': prefix,
+            'Delimiter': '/',
+            'MaxKeys': 1000,
+        }
+        if next_token is not None:
+            req_kwargs['ContinuationToken'] = next_token
 
-        resp = self.connection.s3.meta.client.list_objects_v2(Bucket=self.bucket.name, Prefix=prefix, Delimiter='/')
+        resp = self.connection.s3.meta.client.list_objects_v2(**req_kwargs)
+        next_token_string = resp.get('NextContinuationToken', '')
         contents = resp.get('Contents', [])
         prefixes = resp.get('CommonPrefixes', [])
 
@@ -377,5 +395,8 @@ class S3CompatB3Provider(provider.BaseProvider):
             else:
                 logger.info('_metadata_folder: file: ---')
                 items.append(S3CompatB3FileMetadata(self, content))
+
+        if next_token_string:
+            items.append(next_token_string)
 
         return items
