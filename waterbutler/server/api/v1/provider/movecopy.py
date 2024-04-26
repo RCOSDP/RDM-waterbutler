@@ -189,7 +189,7 @@ class MoveCopyMixin:
             # verify quota if it is osfstorage
             if self.dest_provider.NAME == 'osfstorage' or self.dest_provider.NAME in ADDON_METHOD_PROVIDER:
                 size = self.json.get('size', None)
-                if size:
+                if size is not None:
                     file_size = int(size)
                 else:
                     data = await self.provider.metadata(self.path, version=None, revision=None, next_token=None)

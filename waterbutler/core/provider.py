@@ -900,7 +900,8 @@ class BaseProvider(metaclass=abc.ABCMeta):
             '{}/api/v1/project/{}/institution_storage_user_quota/'.format(wb_settings.OSF_URL, self.nid),
             data=json.dumps({
                 'provider': self.NAME,
-                'path': self.root_id or self.path or '/'
+                'path': self.root_id or self.path or '/',
+                'root_path': getattr(self, 'root_path', None)
             }),
             headers={'Content-Type': 'application/json'},
             expects=(200, )
