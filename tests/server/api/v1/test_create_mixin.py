@@ -286,7 +286,7 @@ class TestUploadFile:
         assert handler.writer.close.called
         handler.set_status.assert_called_once_with(201)
         handler.write.assert_called_once_with({
-            'data': mock_file_metadata.json_api_serialized('3rqws', root_path = '123456789')
+            'data': mock_file_metadata.json_api_serialized('3rqws', root_path='123456789')
         })
 
     @pytest.mark.asyncio
@@ -304,5 +304,5 @@ class TestUploadFile:
         assert handler.writer.close.called
         assert handler.set_status.called is False
         handler.write.assert_called_once_with({
-            'data': mock_file_metadata.json_api_serialized('3rqws', root_path = '123456789')
+            'data': mock_file_metadata.json_api_serialized('3rqws', root_path='123456789')
         })

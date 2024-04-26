@@ -35,7 +35,8 @@ class TestLogToCallback:
         }
 
         mock_send_signed_request.return_value = (200, b'a')
-        await remote_logging.log_to_callback(action, source=mock_source, destination=mock_destination, start_time=start_time, errors=[],
+        await remote_logging.log_to_callback(action, source=mock_source, destination=mock_destination,
+                                             start_time=start_time, errors=[],
                                              request=request)
         mock_send_signed_request.assert_called()
 
@@ -67,7 +68,8 @@ class TestLogToCallback:
 
         mock_send_signed_request.return_value = (400, b'a')
         with pytest.raises(Exception):
-            await remote_logging.log_to_callback(action, source=mock_source, destination=mock_destination, start_time=start_time, errors=[],
+            await remote_logging.log_to_callback(action, source=mock_source, destination=mock_destination,
+                                                 start_time=start_time, errors=[],
                                                  request=request)
         mock_send_signed_request.assert_called()
 
@@ -98,7 +100,8 @@ class TestLogToCallback:
         }
 
         mock_send_signed_request.return_value = (200, b'a')
-        await remote_logging.log_to_callback(action, source=mock_source, destination=mock_destination, start_time=start_time, errors=[],
+        await remote_logging.log_to_callback(action, source=mock_source, destination=mock_destination,
+                                             start_time=start_time, errors=[],
                                              request=request)
         mock_send_signed_request.assert_not_called()
 

@@ -18,11 +18,15 @@ logger = logging.getLogger(__name__)
 
 
 @utils.async_retry(retries=5, backoff=5)
-async def log_to_callback(action, source=None, destination=None, start_time=None, errors=[],
-                          request={}, src_root_path=None, dest_root_path=None, ):
+async def log_to_callback(action, source=None, destination=None, start_time=None, errors=None,
+                          request=None, src_root_path=None, dest_root_path=None):
     """PUT a logging payload back to the callback given by the auth provider."""
-    logger.debug(f'Provider src root path is \'{src_root_path}\'')
-    logger.debug(f'Provider dest root path is \'{dest_root_path}\'')
+
+    if errors is None:
+        errors = []
+    if request is None:
+        request = {}
+
     auth = getattr(destination, 'auth', source.auth)
     ref_url_domain = ''
     log_payload = {
@@ -66,6 +70,7 @@ async def log_to_callback(action, source=None, destination=None, start_time=None
 
     if not auth['callback_url']:
         return None
+
     resp_status, resp_data = await utils.send_signed_request('PUT', auth['callback_url'], log_payload)
 
     if resp_status // 100 != 2:
@@ -216,16 +221,20 @@ async def _send_to_keen(payload, collection, project_id, write_key, action, doma
         return
 
 
-def log_file_action(action, source, api_version, destination=None, request={},
-                    start_time=None, errors=None, bytes_downloaded=None, bytes_uploaded=None, src_root_path=None, dest_root_path=None):
+def log_file_action(action, source, api_version, destination=None, request=None,
+                    start_time=None, errors=None, bytes_downloaded=None, bytes_uploaded=None,
+                    src_root_path=None, dest_root_path=None):
     """Kick off logging actions in the background. Returns array of asyncio.Tasks."""
+    if request is None:
+        request = {}
     return [
         log_to_callback(action, source=source, destination=destination,
-                        start_time=start_time, errors=errors, request=request, src_root_path=src_root_path, dest_root_path=dest_root_path, ),
+                        start_time=start_time, errors=errors, request=request,
+                        src_root_path=src_root_path, dest_root_path=dest_root_path),
         asyncio.ensure_future(
             log_to_keen(action, source=source, destination=destination,
                         errors=errors, request=request, api_version=api_version,
-                        bytes_downloaded=bytes_downloaded, bytes_uploaded=bytes_uploaded,),
+                        bytes_downloaded=bytes_downloaded, bytes_uploaded=bytes_uploaded),
         ),
     ]
 

@@ -99,7 +99,7 @@ class TestBaseMetadata:
 
     def test_file_revision_json_api_serialize(self):
         file_revision_metadata = utils.MockFileRevisionMetadata()
-        serialized = file_revision_metadata.json_api_serialized(root_path ='123456789')
+        serialized = file_revision_metadata.json_api_serialized(root_path='123456789')
 
         assert serialized['id'] == 1
         assert serialized['type'] == 'file_versions'

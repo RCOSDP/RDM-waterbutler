@@ -255,7 +255,7 @@ class TestMetadataMixin:
         await handler.file_metadata()
 
         handler.write.assert_called_once_with({
-            'data': mock_file_metadata.json_api_serialized(handler.resource, root_path = '123456789')
+            'data': mock_file_metadata.json_api_serialized(handler.resource, root_path='123456789')
         })
 
     @pytest.mark.asyncio
@@ -270,7 +270,7 @@ class TestMetadataMixin:
 
         handler.provider.metadata.assert_called_once_with(handler.path, revision='version id')
         handler.write.assert_called_once_with({
-            'data': mock_file_metadata.json_api_serialized(handler.resource, root_path = '123456789')
+            'data': mock_file_metadata.json_api_serialized(handler.resource, root_path='123456789')
         })
 
     @pytest.mark.asyncio

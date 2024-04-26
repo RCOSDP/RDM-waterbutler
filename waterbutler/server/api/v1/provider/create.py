@@ -93,7 +93,7 @@ class CreateMixin:
                 )
             self.target_path = self.path
 
-        # verify quota if it is osfstorage
+        # verify quota if it is osfstorage or addon method provider
         if self.provider.NAME == 'osfstorage' or self.provider.NAME in settings.ADDON_METHOD_PROVIDER:
             file_size = int(self.request.headers.get('Content-Length'))
             self.provider.root_path = self.root_path
@@ -103,7 +103,7 @@ class CreateMixin:
 
     async def create_folder(self):
         self.metadata = await self.provider.create_folder(self.target_path)
-        # set root path to folder metada
+        # set root path to folder metadata
         if self.root_path:
             self.metadata.root_path = self.root_path
         self.set_status(201)

@@ -142,8 +142,8 @@ def test_starttime_override(providers, bundles, callback, mock_time, FAKE_TIME):
     src_bundle, dest_bundle = bundles
 
     stamp = FAKE_TIME
-    copy.copy(cp.deepcopy(src_bundle), cp.deepcopy(dest_bundle), start_time=stamp-100-tasks.settings.WAIT_TIMEOUT)
-    copy.copy(cp.deepcopy(src_bundle), cp.deepcopy(dest_bundle), start_time=stamp+100+tasks.settings.WAIT_TIMEOUT)
+    copy.copy(cp.deepcopy(src_bundle), cp.deepcopy(dest_bundle), start_time=stamp - 100 - tasks.settings.WAIT_TIMEOUT)
+    copy.copy(cp.deepcopy(src_bundle), cp.deepcopy(dest_bundle), start_time=stamp + 100 + tasks.settings.WAIT_TIMEOUT)
 
     (_, _, data), _ = callback.call_args_list[0]
 

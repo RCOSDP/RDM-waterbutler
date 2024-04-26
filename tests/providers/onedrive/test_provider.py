@@ -536,10 +536,10 @@ class TestDownload:
 
         revision_response = revision_fixtures['file_revisions']
         revisions_url = provider._build_drive_url(*path.api_identifier, 'versions')
-        fix= revision_fixtures['file_revision_download_url']
         aiohttpretty.register_json_uri('GET', revisions_url, body=revision_response)
 
-        download_url = provider._build_drive_url(*path.api_identifier, 'versions', revision_fixtures['revision_id'], 'content')
+        download_url = provider._build_drive_url(*path.api_identifier, 'versions',
+                                                 revision_fixtures['revision_id'], 'content')
         aiohttpretty.register_uri('GET', download_url,
                                   body=download_fixtures['file_content'],
                                   headers={'Content-Length': '11'})

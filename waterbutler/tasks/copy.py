@@ -42,7 +42,8 @@ async def copy(src_bundle, dest_bundle, request=None, start_time=None, **kwargs)
 
         await remote_logging.wait_for_log_futures(
             'copy', source=source, destination=destination, start_time=start_time,
-            errors=errors, request=request, api_version='celery', src_root_path=src_bundle.pop('root_path'), dest_root_path=dest_bundle.pop('root_path'),
+            errors=errors, request=request, api_version='celery',
+            src_root_path=src_bundle.pop('root_path'), dest_root_path=dest_bundle.pop('root_path'),
         )
 
     return metadata, created

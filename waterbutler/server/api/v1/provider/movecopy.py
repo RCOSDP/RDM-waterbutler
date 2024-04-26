@@ -44,22 +44,16 @@ class MoveCopyMixin:
             raise exceptions.InvalidParameters('Content-Length is required', code=411)
 
     def build_args(self):
-        if hasattr(self, 'src_root_path'):
-            logger.debug(f'Addon provider src root path is \'{self.src_root_path}\'')
-        if hasattr(self, 'dest_root_path'):
-            logger.debug(f'Addon provider dest root path is \'{self.dest_root_path}\'')
-        logger.debug(f'Src path is \'{self.path}\'')
-        logger.debug(f'Dest path is \'{self.dest_path}\'')
         return ({
             'nid': self.resource,  # TODO rename to anything but nid
             'path': self.path,
             'provider': self.provider.serialized(),
-            'root_path': self.src_root_path if hasattr(self, 'src_root_path') else None
+            'root_path': getattr(self, 'src_root_path', None)
         }, {
             'nid': self.dest_resource,
             'path': self.dest_path,
             'provider': self.dest_provider.serialized(),
-            'root_path': self.dest_root_path if hasattr(self, 'dest_root_path') else None
+            'root_path': getattr(self, 'dest_root_path', None)
         })
 
     async def get_file_size(self, data):
@@ -104,7 +98,6 @@ class MoveCopyMixin:
                 raise exceptions.InvalidParameters('"rename" field is required for renaming')
             provider_action = 'move'
 
-        logger.debug(f'Org path is \'{self.path}\'')
         self.auth = await auth_handler.get(
             self.resource,
             provider,
@@ -126,14 +119,13 @@ class MoveCopyMixin:
                 self.path = '/' + '/'.join(paths) + '/'
             else:
                 self.path = '/' + '/'.join(paths)
-        logger.debug(f'Path without provider addon root path is \'{self.path}\'')
+
         self.provider = make_provider(
             provider,
             self.auth['auth'],
             self.auth['credentials'],
             self.auth['settings']
         )
-
         self.path = await self.provider.validate_v1_path(self.path, **self.arguments)
 
         if auth_action == 'rename':  # 'rename' implies the file/folder does not change location
@@ -158,7 +150,6 @@ class MoveCopyMixin:
 
             # Note: attached to self so that _send_hook has access to these
             self.dest_resource = self.json.get('resource', self.resource)
-
             self.dest_auth = await auth_handler.get(
                 self.dest_resource,
                 self.json.get('provider', self.provider.NAME),
@@ -186,7 +177,7 @@ class MoveCopyMixin:
             else:
                 self.dest_root_path = self.json['path'].strip('/').split('/')[0]
 
-            # verify quota if it is osfstorage
+            # verify the quota if it is osfstorage
             if self.dest_provider.NAME == 'osfstorage' or self.dest_provider.NAME in ADDON_METHOD_PROVIDER:
                 size = self.json.get('size', None)
                 if size is not None:
@@ -204,8 +195,8 @@ class MoveCopyMixin:
                     raise exceptions.NotEnoughQuotaError('You do not have enough available quota.')
 
             self.dest_path = await self.dest_provider.validate_path(**self.json)
+
         if not getattr(self.provider, 'can_intra_' + provider_action)(self.dest_provider, self.path):
-            logger.debug('Move/copy without intra. ')
             # this weird signature syntax courtesy of py3.4 not liking trailing commas on kwargs
             conflict = self.json.get('conflict', DEFAULT_CONFLICT)
             result = await getattr(tasks, provider_action).adelay(
@@ -234,7 +225,6 @@ class MoveCopyMixin:
         else:
             self.set_status(int(HTTPStatus.OK))
         if self.json.get('provider', self.provider.NAME) in ADDON_METHOD_PROVIDER:
-            logger.debug('Update metadata for addon provider. ')
             metadata.root_path = self.dest_root_path
             self.write({'data': metadata.json_api_serialized(self.dest_resource, root_path=self.dest_root_path)})
         else:

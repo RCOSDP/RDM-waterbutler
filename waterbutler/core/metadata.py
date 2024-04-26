@@ -43,27 +43,19 @@ class BaseMetadata(metaclass=abc.ABCMeta):
 
         :rtype: dict
         """
+        serialized_data = {
+            'extra': self.extra,
+            'kind': self.kind,
+            'name': self.name,
+            'path': self.path,
+            'provider': self.provider,
+            'materialized': self.materialized_path,
+            'etag': hashlib.sha256('{}::{}'.format(self.provider, self.etag).encode('utf-8')).hexdigest(),
+        }
         if root_path:
-            return {
-                'extra': self.extra,
-                'kind': self.kind,
-                'name': self.name,
-                'path': self.path,
-                'provider': self.provider,
-                'materialized': self.materialized_path,
-                'etag': hashlib.sha256('{}::{}'.format(self.provider, self.etag).encode('utf-8')).hexdigest(),
-                'root_path': root_path,
-            }
-        else:
-            return {
-                'extra': self.extra,
-                'kind': self.kind,
-                'name': self.name,
-                'path': self.path,
-                'provider': self.provider,
-                'materialized': self.materialized_path,
-                'etag': hashlib.sha256('{}::{}'.format(self.provider, self.etag).encode('utf-8')).hexdigest(),
-            }
+            serialized_data['root_path'] = root_path
+
+        return serialized_data
 
     def json_api_serialized(self, resource: str, root_path=None) -> dict:
         """Returns a dict of primitives suitable for serializing into a JSON-API -compliant
@@ -77,22 +69,16 @@ class BaseMetadata(metaclass=abc.ABCMeta):
 
         :rtype: dict
         """
-        logger.debug(f'provider root path is \'{root_path}\'')
+        json_api = {
+            'id': self.provider + self.path,
+            'type': 'files',
+            'attributes': self.serialized(),
+            'links': self._json_api_links(resource, root_path),
+        }
+
         if root_path:
-            json_api = {
-                'id': self.provider + '/' + root_path.replace('/', '') + self.path,
-                'type': 'files',
-                'attributes': self.serialized(),
-                'links': self._json_api_links(resource, root_path),
-                'root_path': root_path,
-            }
-        else:
-            json_api = {
-                'id': self.provider + self.path,
-                'type': 'files',
-                'attributes': self.serialized(),
-                'links': self._json_api_links(resource),
-            }
+            json_api['id'] = self.provider + '/' + root_path.replace('/', '') + self.path
+            json_api['root_path'] = root_path
 
         # Typing: skip "unsupported target for indexed assignment" errors for nested dict from method
         json_api['attributes']['resource'] = resource  # type: ignore
@@ -103,10 +89,7 @@ class BaseMetadata(metaclass=abc.ABCMeta):
 
         :rtype: dict
         """
-        if root_path:
-            entity_url = self._entity_url(resource, root_path=root_path)
-        else:
-            entity_url = self._entity_url(resource)
+        entity_url = self._entity_url(resource, root_path=root_path)
         actions = {
             'move': entity_url,
             'upload': entity_url + '?kind=file',
@@ -118,10 +101,9 @@ class BaseMetadata(metaclass=abc.ABCMeta):
     def _entity_url(self, resource: str, root_path=None) -> str:
         """ Utility method for constructing the base url for actions. """
         url = furl.furl(settings.DOMAIN)
+        segments = ['v1', 'resources', resource, 'providers', self.provider]
         if root_path:
-            segments = ['v1', 'resources', resource, 'providers', self.provider, root_path.replace('/', '')]
-        else:
-            segments = ['v1', 'resources', resource, 'providers', self.provider]
+            segments = segments + [root_path.replace('/', '')]
         # If self is a folder, path ends with a slash which must be preserved. However, furl
         # percent-encodes the trailing slash. Instead, turn folders into a list of (path_id, ''),
         # and let furl add the slash for us.  The [1:] is because path always begins with a slash,
@@ -242,40 +224,30 @@ class BaseFileMetadata(BaseMetadata):
 
     def serialized(self, root_path=None) -> dict:
         """ Returns a dict representing the file's metadata suitable to be serialized into JSON.
+
         :rtype: dict
         """
-        logger.debug(f'provider root path is \'{root_path}\'')
+        serialized_parts = {
+            'contentType': self.content_type,
+            'modified': self.modified,
+            'modified_utc': self.modified_utc,
+            'created_utc': self.created_utc,
+            'size': self.size,
+            'sizeInt': self.size_as_int,
+        }
+
         if root_path:
-            return dict(super().serialized(), **{
-                'contentType': self.content_type,
-                'modified': self.modified,
-                'modified_utc': self.modified_utc,
-                'created_utc': self.created_utc,
-                'size': self.size,
-                'sizeInt': self.size_as_int,
-                'root_path': root_path,
-            })
-        else:
-            return dict(super().serialized(), **{
-                'contentType': self.content_type,
-                'modified': self.modified,
-                'modified_utc': self.modified_utc,
-                'created_utc': self.created_utc,
-                'size': self.size,
-                'sizeInt': self.size_as_int,
-            })
+            serialized_parts['root_path'] = root_path
+
+        return dict(super().serialized(), **serialized_parts)
 
     def _json_api_links(self, resource: str, root_path=None) -> dict:
-        """ Adds the `download` link to the JSON-API repsonse `links` field.
+        """ Adds the `download` link to the JSON-API response `links` field.
 
         :rtype: dict
         """
-        if root_path:
-            ret = super()._json_api_links(resource, root_path)
-            ret['download'] = self._entity_url(resource, root_path)
-        else:
-            ret = super()._json_api_links(resource)
-            ret['download'] = self._entity_url(resource)
+        ret = super()._json_api_links(resource, root_path)
+        ret['download'] = self._entity_url(resource, root_path)
 
         return ret
 
@@ -351,20 +323,16 @@ class BaseFileRevisionMetadata(metaclass=abc.ABCMeta):
 
             This method determines the output of API v1
         """
-        logger.debug(f'provider root path is \'{root_path}\'')
+        serialized_data = {
+            'id': self.version,
+            'type': 'file_versions',
+            'attributes': self.serialized(),
+        }
+
         if root_path:
-            return {
-                'id': self.version,
-                'type': 'file_versions',
-                'attributes': self.serialized(),
-                'root_path': root_path,
-            }
-        else:
-            return {
-                'id': self.version,
-                'type': 'file_versions',
-                'attributes': self.serialized(),
-            }
+            serialized_data['root_path'] = root_path,
+
+        return serialized_data
 
     @property
     @abc.abstractmethod
@@ -414,15 +382,10 @@ class BaseFolderMetadata(BaseMetadata):
 
         :rtype: dict
         """
-        logger.debug(f'provider root path is \'{root_path}\' or self root path is \'{self.root_path}\'')
-        ret = super().serialized(root_path=root_path or self.root_path)
+        _root_path = root_path or self.root_path
+        ret = super().serialized(root_path=_root_path)
         if self.children is not None:
-            if root_path:
-                ret['children'] = [c.serialized(root_path=root_path) for c in self.children]
-            elif self.root_path:
-                ret['children'] = [c.serialized(root_path=self.root_path) for c in self.children]
-            else:
-                ret['children'] = [c.serialized() for c in self.children]
+            ret['children'] = [c.serialized(root_path=_root_path) for c in self.children]
         return ret
 
     def json_api_serialized(self, resource: str, root_path=None) -> dict:
@@ -431,13 +394,8 @@ class BaseFolderMetadata(BaseMetadata):
 
         :rtype: dict
         """
-        logger.debug(f'provider root path is \'{root_path}\' or self root path is \'{self.root_path}\'')
-        if root_path:
-            ret = super().json_api_serialized(resource, root_path=root_path)
-        elif self.root_path:
-            ret = super().json_api_serialized(resource, root_path=self.root_path)
-        else:
-            ret = super().json_api_serialized(resource)
+        _root_path = root_path or self.root_path
+        ret = super().json_api_serialized(resource, root_path=_root_path)
         ret['attributes']['size'] = None
         ret['attributes']['sizeInt'] = None
         return ret
@@ -447,12 +405,8 @@ class BaseFolderMetadata(BaseMetadata):
 
         :rtype: dict
         """
-        if root_path:
-            ret = super()._json_api_links(resource, root_path)
-            ret['new_folder'] = self._entity_url(resource, root_path) + '?kind=folder'
-        else:
-            ret = super()._json_api_links(resource)
-            ret['new_folder'] = self._entity_url(resource) + '?kind=folder'
+        ret = super()._json_api_links(resource, root_path)
+        ret['new_folder'] = self._entity_url(resource, root_path) + '?kind=folder'
         return ret
 
     @property

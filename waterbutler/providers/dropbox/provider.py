@@ -182,7 +182,10 @@ class DropboxProvider(provider.BaseProvider):
             else:
                 headers = {}
                 if self.NAME == 'dropboxbusiness':
-                    headers = {'Dropbox-API-Select-Admin': None, 'Dropbox-API-Select-User': self.admin_dbmid}
+                    headers = {
+                        'Dropbox-API-Select-Admin': None,
+                        'Dropbox-API-Select-User': self.admin_dbmid
+                    }
                 from_ref_data = await self.dropbox_request(
                     self.build_url('files', 'copy_reference', 'get'),
                     {'path': src_path.full_path.rstrip('/')},

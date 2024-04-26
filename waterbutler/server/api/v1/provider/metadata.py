@@ -36,8 +36,6 @@ class MetadataMixin:
         self.set_header('X-Waterbutler-Metadata', json.dumps(data.json_api_serialized(self.resource)))
 
     async def get_folder(self):
-        logger.debug(f'provider root path is \'{self.root_path}\'')
-        logger.debug(f'folder path is \'{self.path}\'')
         if 'zip' in self.request.query_arguments:
             return (await self.download_folder_as_zip())
 
@@ -52,6 +50,7 @@ class MetadataMixin:
 
         if data and isinstance(data[-1], str):
             data, token = self.provider.handle_data(data)
+
         ret = {'data': [x.json_api_serialized(self.resource, root_path=self.root_path) for x in data]}
         if token is not None:
             ret['next_token'] = token
@@ -59,7 +58,6 @@ class MetadataMixin:
         return self.write(ret)
 
     async def get_file(self):
-        logger.debug(f'provider root path is \'{self.root_path}\'')
         if 'meta' in self.request.query_arguments:
             return (await self.file_metadata())
 
@@ -143,23 +141,18 @@ class MetadataMixin:
     async def file_metadata(self):
         version = self.requested_version
         metadata = await self.provider.metadata(self.path, revision=version)
-        if getattr(self, 'root_path', None):
-            return self.write({
-                'data': metadata.json_api_serialized(self.resource, root_path=self.root_path)
-            })
-        else:
-            return self.write({
-                'data': metadata.json_api_serialized(self.resource)
-            })
+
+        return self.write({
+            'data': metadata.json_api_serialized(self.resource, root_path=getattr(self, 'root_path', None))
+        })
 
     async def get_file_revisions(self):
-        logger.debug(f'provider root path is \'{self.root_path}\'')
         result = self.provider.revisions(self.path)
 
         if asyncio.iscoroutine(result):
             result = await result
             for r in result:
-                r.root_path = self.root_path
+                r.root_path = getattr(self, 'root_path', None)
 
         return self.write({'data': [r.json_api_serialized() for r in result]})
 

@@ -4,13 +4,13 @@ import asyncio
 import inspect  # noqa
 import logging
 from http import HTTPStatus
+
 import tornado.gen
 
 import sentry_sdk
 
 from waterbutler.core import utils
 from waterbutler.server import settings
-
 from waterbutler.settings import ADDON_METHOD_PROVIDER
 from waterbutler.server.api.v1 import core
 from waterbutler.core import remote_logging
@@ -83,12 +83,11 @@ class ProviderHandler(core.BaseHandler, CreateMixin, MetadataMixin, MoveCopyMixi
         # Delay setup of the provider when method is post, as we need to evaluate the json body
         # action.
         if method != 'post':
-            logger.debug(f'org path is \'{self.path}\'')
             self.auth = await auth_handler.get(
                 self.resource, provider, self.request,
                 path=self.path, version=self.requested_version,
                 callback_log=self.callback_log)
-            # Remove addon provider root path in org path
+            # Remove the addon provider root path in the org path
             if provider in ADDON_METHOD_PROVIDER:
                 self.root_path = self.path.strip('/').split('/')[0]
                 paths = self.path.strip('/').split('/')
@@ -97,8 +96,6 @@ class ProviderHandler(core.BaseHandler, CreateMixin, MetadataMixin, MoveCopyMixi
                     self.path = '/' + '/'.join(paths) + '/'
                 else:
                     self.path = '/' + '/'.join(paths)
-
-            logger.debug(f'path without addon provider root path \'{self.path}\'')
             self.provider = utils.make_provider(
                 provider, self.auth['auth'],
                 self.auth['credentials'], self.auth['settings'])
@@ -132,14 +129,12 @@ class ProviderHandler(core.BaseHandler, CreateMixin, MetadataMixin, MoveCopyMixi
         Will redirect to a signed URL if possible and accept_url is not False
         :raises: MustBeFileError if path is not a file
         """
-        logger.debug(f'provider root path is \'{self.root_path}\'')
         if self.path.is_dir:
             return (await self.get_folder())
         return (await self.get_file())
 
     async def put(self, **_):
         """Defined in CreateMixin"""
-        logger.debug(f'provider root path is \'{self.root_path}\'')
         if self.target_path.is_file:
             return (await self.upload_file())
         return (await self.create_folder())
@@ -172,7 +167,9 @@ class ProviderHandler(core.BaseHandler, CreateMixin, MetadataMixin, MoveCopyMixi
 
         self.stream = RequestStreamReader(self.request, self.reader)
         # root_node_path = re.findall('^.*\\/([a-zA-Z0-9]*)\\/\\?name.*$', self.request.uri)[0]
-        self.uploader = asyncio.ensure_future(self.provider.upload(self.stream, self.target_path, root_node_path=self.root_path))
+        self.uploader = asyncio.ensure_future(
+            self.provider.upload(self.stream, self.target_path, root_node_path=self.root_path)
+        )
 
     def on_finish(self):
         status, method = self.get_status(), self.request.method.upper()
