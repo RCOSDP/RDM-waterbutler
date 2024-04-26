@@ -6,6 +6,9 @@ import logging
 import weakref
 import functools
 import itertools
+from asyncio import StreamReader
+from io import BytesIO
+import tornado.iostream
 from urllib import parse
 
 import furl
@@ -19,8 +22,10 @@ from waterbutler.core import path as wb_path
 from waterbutler import settings as wb_settings
 from waterbutler.core.metrics import MetricsRecord
 from waterbutler.core import metadata as wb_metadata
+from waterbutler.core.streams import ResponseStreamReader
 from waterbutler.core.utils import ZipStreamGenerator
 from waterbutler.core.utils import RequestHandlerContext
+from waterbutler.server import settings
 
 
 logger = logging.getLogger(__name__)
@@ -73,6 +78,20 @@ def build_url(base, *segments, **query):
     return url.url
 
 
+def bytes_to_response_content(byte_data):
+    """
+    Convert content from byte to StreamReader
+    :param byte_data: ( :class:`bytes` ) data type bytes
+    """
+    stream_reader = StreamReader()
+    if isinstance(byte_data, bytes):
+        byte_stream = BytesIO(byte_data)
+        stream_reader.feed_data(byte_stream.read())
+        stream_reader.feed_eof()
+
+    return stream_reader
+
+
 class BaseProvider(metaclass=abc.ABCMeta):
     """The base class for all providers. Every provider must, at the least, implement all abstract
     methods in this class.
@@ -86,6 +105,8 @@ class BaseProvider(metaclass=abc.ABCMeta):
     """
 
     BASE_URL = None
+
+    bytes_downloaded = 0
 
     def __init__(self, auth: dict,
                  credentials: dict,
@@ -449,12 +470,24 @@ class BaseProvider(metaclass=abc.ABCMeta):
             return await self._folder_file_op(self.copy, *args, **kwargs)  # type: ignore
 
         download_stream = await self.download(src_path, version=version)
+        is_compression = is_chunked = False
+        if isinstance(download_stream, ResponseStreamReader):
+            is_compression = 'gzip' in download_stream.response.headers.get('Content-Encoding', '')
+            is_chunked = 'chunked' in download_stream.response.headers.get('Transfer-Encoding', '')
+
+        if is_chunked or is_compression:
+            content = await self.clone_content_in_response(download_stream.response)
+            download_stream.response.content = bytes_to_response_content(content)
 
         if getattr(download_stream, 'name', None):
             dest_path.rename(download_stream.name)
 
         if hasattr(download_stream, '_size') and download_stream._size is None:
             download_stream._size = 0
+
+        # update response headers by the original size after decompressing
+        if (is_chunked or is_compression) and self.bytes_downloaded is not None:
+            download_stream._size = self.bytes_downloaded
 
         return await dest_provider.upload(download_stream, dest_path)
 
@@ -865,3 +898,25 @@ class BaseProvider(metaclass=abc.ABCMeta):
     def __repr__(self):
         # Note: credentials are not included on purpose.
         return '<{}({}, {})>'.format(self.__class__.__name__, self.auth, self.settings)
+
+    async def clone_content_in_response(self, response):
+        """
+        Clone content in response
+        :param response: ( :class:`StreamReader` ) the response in ResponseStreamReader
+        """
+        content = response.content
+        chunk_list = []
+        try:
+            while True:
+                chunk = await content.read(settings.CHUNK_SIZE)
+                if not chunk:
+                    # Return a content type bytes
+                    return b"".join(chunk_list)
+                if isinstance(chunk, bytearray):
+                    chunk = bytes(chunk)
+                self.bytes_downloaded += len(chunk)
+                chunk_list.append(chunk)
+        except tornado.iostream.StreamClosedError:
+            # Client has disconnected early.
+            # No need for any exception to be raised
+            return
