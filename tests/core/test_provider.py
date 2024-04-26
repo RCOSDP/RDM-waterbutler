@@ -339,7 +339,7 @@ class TestCopy:
         src_path = await provider1.validate_path('/source/path')
         dest_path = await provider1.validate_path('/destination/path')
         mock_response_stream_reader.response.headers['Content-Encoding'] = 'gzip'
-        mock_response_stream_reader.response.headers['Content-Length'] = '200'
+        mock_response_stream_reader.response.headers['Content-Length'] = '100'
         stream_reader = StreamReader()
         byte_stream = BytesIO(b'data')
         stream_reader.feed_data(byte_stream.read())
@@ -358,7 +358,7 @@ class TestCopy:
         src_path = await provider1.validate_path('/source/path')
         dest_path = await provider1.validate_path('/destination/path')
         mock_response_stream_reader.response.headers['Transfer-Encoding'] = 'chunked'
-        mock_response_stream_reader.response.headers['Content-Length'] = '200'
+        mock_response_stream_reader.response.headers['Content-Length'] = '100'
         stream_reader = StreamReader()
         byte_stream = BytesIO(b'data')
         stream_reader.feed_data(byte_stream.read())
@@ -378,7 +378,7 @@ class TestCopy:
         src_path = await provider1.validate_path('/source/path')
         dest_path = await provider1.validate_path('/destination/path')
         mock_response_stream_reader.response.headers['Content-Encoding'] = 'gzip'
-        mock_response_stream_reader.response.headers['Content-Length'] = '200'
+        mock_response_stream_reader.response.headers['Content-Length'] = '100'
         stream_reader = StreamReader()
         byte_stream = BytesIO(b'')
         stream_reader.feed_data(byte_stream.read())
@@ -400,7 +400,7 @@ class TestCopy:
         src_path = await provider1.validate_path('/source/path')
         dest_path = await provider1.validate_path('/destination/path')
         mock_response_stream_reader.response.headers['Transfer-Encoding'] = 'chunked'
-        mock_response_stream_reader.response.headers['Content-Length'] = '200'
+        mock_response_stream_reader.response.headers['Content-Length'] = '100'
         stream_reader = StreamReader()
         byte_stream = BytesIO(b'')
         stream_reader.feed_data(byte_stream.read())
