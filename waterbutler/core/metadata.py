@@ -73,12 +73,14 @@ class BaseMetadata(metaclass=abc.ABCMeta):
             'id': self.provider + self.path,
             'type': 'files',
             'attributes': self.serialized(),
-            'links': self._json_api_links(resource, root_path),
         }
 
         if root_path:
+            json_api['links'] = self._json_api_links(resource, root_path)
             json_api['id'] = self.provider + '/' + root_path.replace('/', '') + self.path
             json_api['root_path'] = root_path
+        else:
+            json_api['links'] = self._json_api_links(resource)
 
         # Typing: skip "unsupported target for indexed assignment" errors for nested dict from method
         json_api['attributes']['resource'] = resource  # type: ignore
