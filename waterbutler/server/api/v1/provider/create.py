@@ -64,8 +64,13 @@ class CreateMixin:
             validated_target_path = await self.provider.revalidate_path(
                 self.path, self.target_path.name, self.target_path.is_dir
             )
-
-            my_type_exists = await self.provider.exists(validated_target_path)
+            kwargs = {
+                'path': validated_target_path
+            }
+            force_retry = self.get_query_argument('force_retry', default=False)
+            if force_retry:
+                kwargs['force_retry'] = force_retry
+            my_type_exists = await self.provider.exists(**kwargs)
             if not isinstance(my_type_exists, bool) or my_type_exists:
                 raise exceptions.NamingConflict(self.target_path.name)
 
@@ -77,8 +82,13 @@ class CreateMixin:
                 validated_target_flipped = await self.provider.revalidate_path(
                     self.path, target_flipped.name, target_flipped.is_dir
                 )
-
-                other_exists = await self.provider.exists(validated_target_flipped)
+                kwargs = {
+                    'path': validated_target_flipped
+                }
+                force_retry = self.get_query_argument('force_retry', default=False)
+                if force_retry:
+                    kwargs['force_retry'] = force_retry
+                other_exists = await self.provider.exists(**kwargs)
                 # the dropbox provider's metadata() method returns a [] here instead of True
                 if not isinstance(other_exists, bool) or other_exists:
                     raise exceptions.NamingConflict(self.target_path.name)
@@ -101,7 +111,13 @@ class CreateMixin:
                 raise exceptions.NotEnoughQuotaError('You do not have enough available quota.')
 
     async def create_folder(self):
-        self.metadata = await self.provider.create_folder(self.target_path)
+        kwargs = {
+            'path': self.target_path
+        }
+        force_retry = self.get_query_argument('force_retry', default=False)
+        if force_retry:
+            kwargs['force_retry'] = force_retry
+        self.metadata = await self.provider.create_folder(**kwargs)
         self.set_status(201)
         self.write({'data': self.metadata.json_api_serialized(self.resource)})
 

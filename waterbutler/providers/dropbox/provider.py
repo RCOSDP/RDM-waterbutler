@@ -92,7 +92,7 @@ class DropboxProvider(provider.BaseProvider):
         :param dict \*\*kwargs: passed through to BaseProvider.make_request()
         """
         kwargs['retry'] = kwargs.get('retry', pd_settings.RETRY)
-        kwargs['force_retry_on'] = kwargs.get('force_retry_on', self.FORCE_RETRY_ON)
+        kwargs['force_retry_on'] = kwargs.get('force_retry_on', set())
         resp = await self.make_request(
             'POST',
             url,
@@ -135,10 +135,15 @@ class DropboxProvider(provider.BaseProvider):
         if path == '/':
             return WaterButlerPath(path, prepend=self.folder)
         implicit_folder = path.endswith('/')
+        # In case has force_retry flag use FORCE_RETRY_ON
+        force_retry_on = set()
+        if kwargs.get('force_retry', False):
+            force_retry_on = self.FORCE_RETRY_ON
         data = await self.dropbox_request(
             self.build_url('files', 'get_metadata'),
             {'path': self.folder.rstrip('/') + path.rstrip('/')},
             throws=core_exceptions.MetadataError,
+            force_retry_on=force_retry_on,
         )
         explicit_folder = data['.tag'] == 'folder'
         if explicit_folder != implicit_folder:
@@ -509,14 +514,17 @@ class DropboxProvider(provider.BaseProvider):
             body = {'path': 'rev:' + revision}
         elif path.is_folder:
             url = self.build_url('files', 'list_folder')
-
+        # In case has force_retry flag use FORCE_RETRY_ON
+        force_retry_on = set()
+        if kwargs.get('force_retry', False):
+            force_retry_on = self.FORCE_RETRY_ON
         if path.is_folder:
             ret = []  # type: typing.List[BaseDropboxMetadata]
             has_more = True
             page_count = 0
             while has_more:
                 page_count += 1
-                data = await self.dropbox_request(url, body, throws=core_exceptions.MetadataError)
+                data = await self.dropbox_request(url, body, throws=core_exceptions.MetadataError, force_retry_on=force_retry_on)
                 for entry in data['entries']:
                     if entry['.tag'] == 'folder':
                         ret.append(DropboxFolderMetadata(entry, self.folder, self.NAME))
@@ -530,7 +538,7 @@ class DropboxProvider(provider.BaseProvider):
             self.metrics.add('metadata.folder.pages', page_count)
             return ret
 
-        data = await self.dropbox_request(url, body, throws=core_exceptions.MetadataError)
+        data = await self.dropbox_request(url, body, throws=core_exceptions.MetadataError, force_retry_on=force_retry_on)
         # Dropbox v2 API will not indicate file/folder if path "deleted"
         if data['.tag'] == 'deleted':
             raise core_exceptions.MetadataError(
@@ -570,11 +578,15 @@ class DropboxProvider(provider.BaseProvider):
         :param str path: The path to create a folder at
         """
         WaterButlerPath.validate_folder(path)
+        # In case has force_retry flag use FORCE_RETRY_ON
+        force_retry_on = set()
+        if kwargs.get('force_retry', False):
+            force_retry_on = self.FORCE_RETRY_ON
         data = await self.dropbox_request(
             self.build_url('files', 'create_folder_v2'),
             {'path': path.full_path.rstrip('/')},
             throws=core_exceptions.CreateFolderError,
-            force_retry_on={409, 429},
+            force_retry_on=force_retry_on,
         )
         return DropboxFolderMetadata(data['metadata'], self.folder, self.NAME)
 

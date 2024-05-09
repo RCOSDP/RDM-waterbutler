@@ -75,11 +75,11 @@ class TestValidatePut:
         await handler.postvalidate_put()
 
         assert handler.target_path == WaterButlerPath('/Folder1/child!/')
-        handler.get_query_argument.assert_called_once_with('name', default=None)
+        handler.get_query_argument.assert_any_call('name', default=None)
 
         handler.provider.exists.assert_has_calls([
-            mock.call(WaterButlerPath('/Folder1/child!', prepend=None)),
-            mock.call(WaterButlerPath('/Folder1/child!', prepend=None))
+            mock.call(force_retry='child!', path=WaterButlerPath('/Folder1/child!', prepend=None)),
+            mock.call(force_retry='child!', path=WaterButlerPath('/Folder1/child!', prepend=None))
         ])
 
     @pytest.mark.asyncio
@@ -98,9 +98,9 @@ class TestValidatePut:
                                     'exists in this location'
 
         assert handler.target_path == WaterButlerPath('/Folder1/child!/')
-        handler.get_query_argument.assert_called_once_with('name', default=None)
+        handler.get_query_argument.assert_any_call('name', default=None)
         handler.provider.exists.assert_called_once_with(
-            WaterButlerPath('/Folder1/child!', prepend=None))
+            force_retry='child!', path=WaterButlerPath('/Folder1/child!', prepend=None))
 
     @pytest.mark.asyncio
     async def test_postvalidate_put_cant_duplicate_names(self, http_request):
@@ -115,8 +115,8 @@ class TestValidatePut:
         await handler.postvalidate_put()
 
         assert handler.target_path == WaterButlerPath('/Folder1/child!/')
-        handler.get_query_argument.assert_called_once_with('name', default=None)
-        handler.provider.exists.assert_called_with(WaterButlerPath('/Folder1/child!', prepend=None))
+        handler.get_query_argument.assert_any_call('name', default=None)
+        handler.provider.exists.assert_called_with(force_retry='child!', path=WaterButlerPath('/Folder1/child!', prepend=None))
         handler.provider.can_duplicate_names.assert_called_once_with()
 
     @pytest.mark.asyncio
@@ -136,9 +136,9 @@ class TestValidatePut:
                                     'exists in this location'
 
         handler.provider.can_duplicate_names.assert_called_once_with()
-        handler.get_query_argument.assert_called_once_with('name', default=None)
+        handler.get_query_argument.assert_any_call('name', default=None)
         handler.provider.exists.assert_called_with(
-            WaterButlerPath('/Folder1/child!', prepend=None))
+            force_retry='child!', path=WaterButlerPath('/Folder1/child!', prepend=None))
 
     def test_invalid_kind(self, http_request):
 
@@ -258,6 +258,7 @@ class TestCreateFolder:
         handler.provider.create_folder = MockCoroutine(return_value=mock_folder_metadata)
         handler.target_path = WaterButlerPath('/apath/')
         handler.set_status = mock.Mock()
+        handler.get_query_argument = mock.Mock(return_value=None)
 
         await handler.create_folder()
 
@@ -265,7 +266,7 @@ class TestCreateFolder:
         handler.write.assert_called_once_with({
             'data': mock_folder_metadata.json_api_serialized('3rqws')
         })
-        handler.provider.create_folder.assert_called_once_with(WaterButlerPath('/apath/'))
+        handler.provider.create_folder.assert_called_once_with(path=WaterButlerPath('/apath/'))
 
 
 class TestUploadFile:
