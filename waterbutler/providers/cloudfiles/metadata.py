@@ -93,7 +93,6 @@ class CloudFilesHeaderMetadata(BaseCloudFilesMetadata, metadata.BaseFileMetadata
 
 
 class CloudFilesFolderMetadata(BaseCloudFilesMetadata, metadata.BaseFolderMetadata):
-
     @property
     def name(self):
         return os.path.split(self.raw['subdir'].rstrip('/'))[1]
@@ -101,3 +100,11 @@ class CloudFilesFolderMetadata(BaseCloudFilesMetadata, metadata.BaseFolderMetada
     @property
     def path(self):
         return self.build_path(self.raw['subdir'])
+
+    @property
+    def created(self):
+        return self.raw.get('created_at')
+
+    @property
+    def modified(self):
+        return self.raw.get('modified_at')

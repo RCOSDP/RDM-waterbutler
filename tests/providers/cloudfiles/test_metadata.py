@@ -215,7 +215,11 @@ class TestCloudfilesMetadata:
             'path': '/level1/',
             'provider': 'cloudfiles',
             'materialized': '/level1/',
-            'etag': '69cf764abe6f2e90dc81fb4218e15f202f9b99bcd1963cf2d5f011629d6f0d8a'
+            'etag': '69cf764abe6f2e90dc81fb4218e15f202f9b99bcd1963cf2d5f011629d6f0d8a',
+            'created': None,
+            'created_utc': None,
+            'modified': None,
+            'modified_utc': None
         }
 
         assert data.json_api_serialized('cn42d') == {
@@ -231,7 +235,11 @@ class TestCloudfilesMetadata:
                 'etag': '69cf764abe6f2e90dc81fb4218e15f202f9b99bcd1963cf2d5f011629d6f0d8a',
                 'resource': 'cn42d',
                 'size': None,
-                'sizeInt': None
+                'sizeInt': None,
+                'created': None,
+                'created_utc': None,
+                'modified': None,
+                'modified_utc': None
             },
             'links': {
                 'move': 'http://localhost:7777/v1/resources/cn42d/providers/cloudfiles/level1/',

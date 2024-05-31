@@ -111,7 +111,11 @@ class TestDropboxMetadata:
             'path': '/newfolder/',
             'provider': provider.NAME,
             'materialized': '/newfolder/',
-            'etag': etag
+            'etag': etag,
+            'created': None,
+            'created_utc': None,
+            'modified': None,
+            'modified_utc': None
         }
 
         link_url = 'http://localhost:7777/v1/resources/mucuew/providers/{}/newfolder/'.format(provider.NAME)
@@ -129,6 +133,10 @@ class TestDropboxMetadata:
                 'resource': 'mucuew',
                 'size': None,
                 'sizeInt': None,
+                'created': None,
+                'created_utc': None,
+                'modified': None,
+                'modified_utc': None
             },
             'links': {
                 'move': link_url,
