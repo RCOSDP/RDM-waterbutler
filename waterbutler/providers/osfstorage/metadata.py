@@ -121,7 +121,6 @@ class OsfStorageFolderMetadata(BaseOsfStorageItemMetadata, metadata.BaseFolderMe
         return self.raw.get('modified')
 
 
-
 class OsfStorageRevisionMetadata(BaseOsfStorageMetadata, metadata.BaseFileRevisionMetadata):
 
     @property

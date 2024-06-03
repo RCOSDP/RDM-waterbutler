@@ -125,7 +125,6 @@ class BitbucketFolderMetadata(BaseBitbucketMetadata, metadata.BaseFolderMetadata
         return self.raw.get('modified_at')
 
 
-
 class BitbucketRevisionMetadata(metadata.BaseFileRevisionMetadata):
 
     @property
