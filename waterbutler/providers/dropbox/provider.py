@@ -171,15 +171,42 @@ class DropboxProvider(provider.BaseProvider):
         dest_folder = dest_provider.folder
         try:
             if self == dest_provider:
-                data = await self.dropbox_request(
-                    self.build_url('files', 'copy_v2'),
-                    {
-                        'from_path': src_path.full_path.rstrip('/'),
-                        'to_path': dest_path.full_path.rstrip('/'),
-                    },
-                    expects=(200, 201, 409),
-                    throws=core_exceptions.IntraCopyError,
-                )
+                if hasattr(self, 'team_folder_name'):
+                    # In case copy file from dropbox business to dropbox business
+                    current_account = await self.dropbox_request(
+                        self.build_url('users', 'get_current_account'),
+                        body=None,
+                        throws=core_exceptions.IntraCopyError('An error occurred on the Dropbox servers'),
+                    )
+
+                    header = {
+                        'Dropbox-API-Path-Root': json.dumps({
+                            '.tag': 'root',
+                             'root': current_account['root_info']['root_namespace_id']
+                        })
+                    }
+                    data = await self.dropbox_request(
+                        self.build_url('files', 'copy_v2'),
+                        {
+                            'from_path': '/' + self.team_folder_name + src_path.full_path.rstrip('/'),
+                            'to_path': '/' + dest_provider.team_folder_name + dest_path.full_path.rstrip('/'),
+                        },
+                        expects=(200, 201, 409),
+                        headers=header,
+                        throws=core_exceptions.IntraCopyError,
+                    )
+                    data['metadata']['path_lower'] = dest_path.full_path.lower().rstrip('/')
+                    data['metadata']['path_display'] = dest_path.full_path.rstrip('/')
+                else:
+                    data = await self.dropbox_request(
+                        self.build_url('files', 'copy_v2'),
+                        {
+                            'from_path': src_path.full_path.rstrip('/'),
+                            'to_path': dest_path.full_path.rstrip('/'),
+                        },
+                        expects=(200, 201, 409),
+                        throws=core_exceptions.IntraCopyError,
+                    )
             else:
                 from_ref_data = await self.dropbox_request(
                     self.build_url('files', 'copy_reference', 'get'),
@@ -210,21 +237,48 @@ class DropboxProvider(provider.BaseProvider):
                          dest_provider: 'DropboxProvider',
                          src_path: WaterButlerPath,
                          dest_path: WaterButlerPath) -> typing.Tuple[BaseDropboxMetadata, bool]:
-        if dest_path.full_path.lower() == src_path.full_path.lower():
+        if self.shares_storage_root(dest_provider) and dest_path.full_path.lower() == src_path.full_path.lower():
             # Dropbox does not support changing the casing in a file name
             raise core_exceptions.InvalidPathError(
                 'In Dropbox to change case, add or subtract other characters.')
 
         try:
-            data = await self.dropbox_request(
-                self.build_url('files', 'move_v2'),
-                {
-                    'from_path': src_path.full_path.rstrip('/'),
-                    'to_path': dest_path.full_path.rstrip('/'),
-                },
-                expects=(200, 201, 409),
-                throws=core_exceptions.IntraMoveError,
-            )
+            if hasattr(self, 'team_folder_name'):
+                # In case move file from dropbox business to dropbox business
+                current_account = await self.dropbox_request(
+                    self.build_url('users', 'get_current_account'),
+                    body=None,
+                    throws=core_exceptions.IntraMoveError('An error occurred on the Dropbox servers'),
+                )
+                header = {
+                    'Dropbox-API-Path-Root': json.dumps({
+                        '.tag': 'root',
+                        'root': current_account['root_info']['root_namespace_id']
+                    })
+                }
+                data = await self.dropbox_request(
+                    self.build_url('files', 'move_v2'),
+                    {
+                        'from_path': '/' + self.team_folder_name + src_path.full_path.rstrip('/'),
+                        'to_path': '/' + dest_provider.team_folder_name + dest_path.full_path.rstrip('/'),
+                    },
+                    expects=(200, 201, 409),
+                    headers=header,
+                    throws=core_exceptions.IntraMoveError,
+                )
+                data['metadata']['path_lower'] = dest_path.full_path.lower().rstrip('/')
+                data['metadata']['path_display'] = dest_path.full_path.rstrip('/')
+            else:
+                # In case move file from dropbox to dropbox
+                data = await self.dropbox_request(
+                    self.build_url('files', 'move_v2'),
+                    {
+                        'from_path': src_path.full_path.rstrip('/'),
+                        'to_path': dest_path.full_path.rstrip('/'),
+                    },
+                    expects=(200, 201, 409),
+                    throws=core_exceptions.IntraMoveError,
+                )
             data = data['metadata']
         except pd_exceptions.DropboxNamingConflictError:
             await dest_provider.delete(dest_path)

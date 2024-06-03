@@ -1,6 +1,6 @@
 import pytest
 
-from waterbutler.providers.nextcloud.metadata import NextcloudFileRevisionMetadata
+from waterbutler.providers.nextcloud.metadata import NextcloudFileRevisionMetadata, NextcloudFileMetadata
 
 from tests.providers.nextcloud.fixtures import (
     auth,
@@ -171,3 +171,13 @@ class TestRevisionMetadata:
         revision = NextcloudFileRevisionMetadata.from_metadata(
             file_metadata_object.provider, self.version, file_metadata_object)
         assert revision == revision_metadata_object
+
+
+class TestBaseNextcloudMetadata:
+    def test_folder_exists_in_href_of_path_function(self):
+        data = NextcloudFileMetadata('/folder_exists/href/test.txt', '/folder_exists/', 'provider', None)
+        assert data.path == '/href/test.txt'
+
+    def test_folder_not_exists_in_href_of_path_function(self):
+        data = NextcloudFileMetadata('/href/test.txt', '/folder/', 'provider', None)
+        assert data.path == '/test.txt'
