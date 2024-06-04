@@ -182,7 +182,7 @@ class DropboxProvider(provider.BaseProvider):
                     header = {
                         'Dropbox-API-Path-Root': json.dumps({
                             '.tag': 'root',
-                             'root': current_account['root_info']['root_namespace_id']
+                            'root': current_account['root_info']['root_namespace_id']
                         })
                     }
                     data = await self.dropbox_request(
