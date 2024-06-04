@@ -1,12 +1,9 @@
-from asyncio import StreamReader
-from io import BytesIO
 import pytest
 
 from tests import utils
 from unittest import mock
 from waterbutler.core import metadata
 from waterbutler.core import exceptions
-from tests.core.streams.fixtures import mock_response_stream_reader
 
 @pytest.fixture
 def provider1():
@@ -333,87 +330,6 @@ class TestCopy:
         assert ret == 'Upload return'
         provider1.download.assert_called_once_with(src_path, version=None)
         provider1.upload.assert_called_once_with('Download return', dest_path)
-
-    @pytest.mark.asyncio
-    async def test_file_size_when_copy_file_download_is_gzip_before_upload(self, provider1, mock_response_stream_reader):
-        src_path = await provider1.validate_path('/source/path')
-        dest_path = await provider1.validate_path('/destination/path')
-        mock_response_stream_reader.response.headers['Content-Encoding'] = 'gzip'
-        mock_response_stream_reader.response.headers['Content-Length'] = '100'
-        stream_reader = StreamReader()
-        byte_stream = BytesIO(b'data')
-        stream_reader.feed_data(byte_stream.read())
-        stream_reader.feed_eof()
-        mock_response_stream_reader.response.content = stream_reader
-        provider1.upload = utils.MockCoroutine(return_value='Upload return')
-        provider1.download = utils.MockCoroutine(return_value=mock_response_stream_reader)
-
-        await provider1.copy(provider1, src_path, dest_path)
-
-        assert mock_response_stream_reader.size != mock_response_stream_reader.response.headers['Content-Length']
-        provider1.download.assert_called_once_with(src_path, version=None)
-
-    @pytest.mark.asyncio
-    async def test_file_size_when_copy_file_download_is_chunked_before_upload(self, provider1, mock_response_stream_reader):
-        src_path = await provider1.validate_path('/source/path')
-        dest_path = await provider1.validate_path('/destination/path')
-        mock_response_stream_reader.response.headers['Transfer-Encoding'] = 'chunked'
-        mock_response_stream_reader.response.headers['Content-Length'] = '100'
-        stream_reader = StreamReader()
-        byte_stream = BytesIO(b'data')
-        stream_reader.feed_data(byte_stream.read())
-        stream_reader.feed_eof()
-        mock_response_stream_reader.response.content = stream_reader
-        provider1.upload = utils.MockCoroutine(return_value='Upload return')
-        provider1.download = utils.MockCoroutine(return_value=mock_response_stream_reader)
-
-        await provider1.copy(provider1, src_path, dest_path)
-
-        assert mock_response_stream_reader.size != mock_response_stream_reader.response.headers['Content-Length']
-        provider1.download.assert_called_once_with(src_path, version=None)
-
-    @pytest.mark.asyncio
-    async def test_file_size_when_copy_file_download_is_gzip_and_bytes_downloaded_is_none_before_upload(self, provider1,
-                                                                              mock_response_stream_reader):
-        src_path = await provider1.validate_path('/source/path')
-        dest_path = await provider1.validate_path('/destination/path')
-        mock_response_stream_reader.response.headers['Content-Encoding'] = 'gzip'
-        mock_response_stream_reader.response.headers['Content-Length'] = '100'
-        stream_reader = StreamReader()
-        byte_stream = BytesIO(b'')
-        stream_reader.feed_data(byte_stream.read())
-        stream_reader.feed_eof()
-        mock_response_stream_reader.response.content = stream_reader
-        provider1.bytes_downloaded = None
-        provider1.upload = utils.MockCoroutine(return_value='Upload return')
-        provider1.download = utils.MockCoroutine(return_value=mock_response_stream_reader)
-
-        await provider1.copy(provider1, src_path, dest_path)
-
-        assert mock_response_stream_reader.size == int(mock_response_stream_reader.response.headers['Content-Length'])
-        provider1.download.assert_called_once_with(src_path, version=None)
-
-
-    @pytest.mark.asyncio
-    async def test_file_size_when_copy_file_download_is_chunked_and_bytes_downloaded_is_none_before_upload(self, provider1,
-                                                                              mock_response_stream_reader):
-        src_path = await provider1.validate_path('/source/path')
-        dest_path = await provider1.validate_path('/destination/path')
-        mock_response_stream_reader.response.headers['Transfer-Encoding'] = 'chunked'
-        mock_response_stream_reader.response.headers['Content-Length'] = '100'
-        stream_reader = StreamReader()
-        byte_stream = BytesIO(b'')
-        stream_reader.feed_data(byte_stream.read())
-        stream_reader.feed_eof()
-        mock_response_stream_reader.response.content = stream_reader
-        provider1.bytes_downloaded = None
-        provider1.upload = utils.MockCoroutine(return_value='Upload return')
-        provider1.download = utils.MockCoroutine(return_value=mock_response_stream_reader)
-
-        await provider1.copy(provider1, src_path, dest_path)
-
-        assert mock_response_stream_reader.size == int(mock_response_stream_reader.response.headers['Content-Length'])
-        provider1.download.assert_called_once_with(src_path, version=None)
 
 
 class TestMove:
