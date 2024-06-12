@@ -67,7 +67,6 @@ class MoveCopyMixin:
                 if data_child and isinstance(data_child[-1], str):
                     data_child, token = self.provider.handle_data(data_child)
                 size += await self.get_file_size(data_child)
-            logger.warning(f'size is {size}')
         return size
 
     async def move_or_copy(self):
@@ -186,7 +185,6 @@ class MoveCopyMixin:
                     data = await self.provider.metadata(self.path, version=None, revision=None, next_token=None)
                     if data and isinstance(data[-1], str):
                         data, token = self.provider.handle_data(data)
-                    logger.warning(f'data is {data}')
                     file_size = await self.get_file_size(data)
                 if self.dest_provider.NAME in ADDON_METHOD_PROVIDER:
                     self.dest_provider.root_path = self.dest_root_path

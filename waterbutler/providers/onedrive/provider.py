@@ -381,10 +381,10 @@ class OneDriveProvider(provider.BaseProvider):
         return False
 
     def can_intra_move(self, other: provider.BaseProvider, path: WaterButlerPath=None) -> bool:
-        return self == other
+        return self == other and self.drive_id == other.drive_id
 
     def can_intra_copy(self, other: provider.BaseProvider, path: WaterButlerPath=None) -> bool:
-        return self == other
+        return self == other and self.drive_id == other.drive_id
 
     async def intra_move(self,
                          dest_provider: 'OneDriveProvider',

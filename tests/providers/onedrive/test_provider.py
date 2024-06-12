@@ -8,6 +8,7 @@ from waterbutler.core import exceptions
 from waterbutler.providers.onedrive.provider import OneDrivePath
 from waterbutler.providers.onedrive.metadata import OneDriveFileMetadata
 from waterbutler.providers.onedrive.metadata import OneDriveFolderMetadata
+from waterbutler.providers.onedrive import OneDriveProvider
 
 from tests.providers.onedrive.fixtures import (auth,
                                                settings,
@@ -772,3 +773,11 @@ class TestOperations:
 
     def test_can_duplicate_names(self, provider):
         assert provider.can_duplicate_names() is False
+
+    def test_can_intra_copy_not_same_drive_id(self, provider):
+        dif_provider = OneDriveProvider(provider.auth,provider.credentials,{'folder': 'root', 'drive_id': 'difference'})
+        assert provider.can_intra_copy(dif_provider) is False
+
+    def test_can_intra_move_not_same_drive_id(self, provider):
+        dif_provider = OneDriveProvider(provider.auth,provider.credentials,{'folder': 'root', 'drive_id': 'difference'})
+        assert provider.can_intra_move(dif_provider) is False
