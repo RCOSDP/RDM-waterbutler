@@ -276,7 +276,7 @@ class S3CompatProvider(provider.BaseProvider):
 
         download_stream = streams.ResponseStreamReader(resp)
 
-        if hasattr(download_stream, '_size') and download_stream._size is None:
+        if hasattr(download_stream, '_size') and download_stream._size is None and pre_size is not None:
             # if the GetObject API doesn't return Content-Length header,
             # use metadata content-size or range size instead of it.
             download_stream._size = pre_size
