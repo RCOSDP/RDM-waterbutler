@@ -25,7 +25,7 @@ from waterbutler.core.utils import RequestHandlerContext
 
 logger = logging.getLogger(__name__)
 _THROTTLES = weakref.WeakKeyDictionary()  # type: weakref.WeakKeyDictionary
-NO_URL_ENCODED_PROVIDERS = ['nextcloud', 'owncloud', 'nextcloudinstitutions']
+NO_URL_ENCODED_PROVIDERS = ['nextcloud', 'nextcloudinstitutions', 'owncloud']
 
 
 def throttle(concurrency=10, interval=1):
@@ -292,8 +292,10 @@ class BaseProvider(metaclass=abc.ABCMeta):
         while retry >= 0:
             # Don't overwrite the callable ``url`` so that signed URLs are refreshed for every retry
             non_callable_url = url() if callable(url) else url
+            # some providers need encode URL before passing it to aiohttp request
             if self.NAME not in NO_URL_ENCODED_PROVIDERS:
-                # Fix storage 'nextcloud', 'owncloud', 'nextcloudinstitutions' return HTTP 400 bad request
+                # use `encoded=True` parameter prevents URL auto-encoding,
+                # the user is responsible about URL correctness.
                 non_callable_url = URL(non_callable_url, encoded=True)
             try:
                 self.provider_metrics.incr('requests.count')

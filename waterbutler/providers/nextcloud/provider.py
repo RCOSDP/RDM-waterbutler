@@ -280,28 +280,29 @@ class NextcloudProvider(provider.BaseProvider):
             items = await utils.parse_dav_response(self.NAME, content, self.folder, skip_first)
         await response.release()
 
-        for i in items:
-            if i.is_file and self.NAME == 'nextcloudinstitutions':
-                params = {
-                    'path': i._href,
-                    'hash': 'md5,sha256,sha512'
-                }
-                response = await self.make_request('GET',
-                    self._ocs_url + 'apps/checksum_api/api/checksum',
-                    params=params,
-                    expects=(200, 404),
-                    throws=exceptions.MetadataError,
-                    auth=self._auth,
-                    connector=self.connector(),
-                    headers={'OCS-APIRequest': 'true'}
-                )
+        if not path.is_dir:
+            for i in items:
+                if i.is_file:
+                    params = {
+                        'path': i._href,
+                        'hash': 'md5,sha256,sha512'
+                    }
+                    response = await self.make_request('GET',
+                        self._ocs_url + 'apps/checksum_api/api/checksum',
+                        params=params,
+                        expects=(200, 404),
+                        throws=exceptions.MetadataError,
+                        auth=self._auth,
+                        connector=self.connector(),
+                        headers={'OCS-APIRequest': 'true'}
+                    )
 
-                if response.status == 200:
-                    content = await response.content.read()
-                    extra = {}
-                    extra['hashes'] = await utils.parse_checksum_response(content)
-                    i.extra = extra
-                await response.release()
+                    if response.status == 200:
+                        content = await response.content.read()
+                        extra = {}
+                        extra['hashes'] = await utils.parse_checksum_response(content)
+                        i.extra = extra
+                    await response.release()
 
         return items
 
@@ -326,27 +327,26 @@ class NextcloudProvider(provider.BaseProvider):
         if len(items) != 1:
             return items
 
-        if self.NAME == 'nextcloudinstitutions':
-            params = {
-                'path': path.full_path,
-                'hash': 'md5,sha256,sha512'
-            }
-            response = await self.make_request('GET',
-                self._ocs_url + 'apps/checksum_api/api/checksum',
-                params=params,
-                expects=(200, 404),
-                throws=exceptions.MetadataError,
-                auth=self._auth,
-                connector=self.connector(),
-                headers={'OCS-APIRequest': 'true'}
-            )
+        params = {
+            'path': path.full_path,
+            'hash': 'md5,sha256,sha512'
+        }
+        response = await self.make_request('GET',
+            self._ocs_url + 'apps/checksum_api/api/checksum',
+            params=params,
+            expects=(200, 404),
+            throws=exceptions.MetadataError,
+            auth=self._auth,
+            connector=self.connector(),
+            headers={'OCS-APIRequest': 'true'}
+        )
 
-            if response.status == 200:
-                content = await response.content.read()
-                extra = {}
-                extra['hashes'] = await utils.parse_checksum_response(content)
-                items[0].extra = extra
-            await response.release()
+        if response.status == 200:
+            content = await response.content.read()
+            extra = {}
+            extra['hashes'] = await utils.parse_checksum_response(content)
+            items[0].extra = extra
+        await response.release()
 
         fileid = items[0].fileid
 
@@ -364,29 +364,28 @@ class NextcloudProvider(provider.BaseProvider):
             revision_items = await utils.parse_dav_response(self.NAME, content, self.folder, True)
         await response.release()
 
-        if self.NAME == 'nextcloudinstitutions':
-            for rev in revision_items:
-                params = {
-                    'path': path.full_path,
-                    'hash': 'md5,sha256,sha512',
-                    'revision': str(rev.etag)
-                }
-                response = await self.make_request('GET',
-                    self._ocs_url + 'apps/checksum_api/api/checksum',
-                    params=params,
-                    expects=(200, 404),
-                    throws=exceptions.MetadataError,
-                    auth=self._auth,
-                    connector=self.connector(),
-                    headers={'OCS-APIRequest': 'true'}
-                )
+        for rev in revision_items:
+            params = {
+                'path': path.full_path,
+                'hash': 'md5,sha256,sha512',
+                'revision': str(rev.etag)
+            }
+            response = await self.make_request('GET',
+                self._ocs_url + 'apps/checksum_api/api/checksum',
+                params=params,
+                expects=(200, 404),
+                throws=exceptions.MetadataError,
+                auth=self._auth,
+                connector=self.connector(),
+                headers={'OCS-APIRequest': 'true'}
+            )
 
-                if response.status == 200:
-                    content = await response.content.read()
-                    extra = {}
-                    extra['hashes'] = await utils.parse_checksum_response(content)
-                    rev.extra = extra
-                await response.release()
+            if response.status == 200:
+                content = await response.content.read()
+                extra = {}
+                extra['hashes'] = await utils.parse_checksum_response(content)
+                rev.extra = extra
+            await response.release()
 
         items.extend(revision_items)
 
