@@ -1,4 +1,4 @@
-import time
+import time, datetime
 import logging
 
 from waterbutler.tasks import core
@@ -11,7 +11,8 @@ logger = logging.getLogger(__name__)
 
 @core.celery_task
 async def move(src_bundle, dest_bundle, request=None, start_time=None, **kwargs):
-
+    begin = time.time()
+    logger.info(f"--------------Begin move : {datetime.datetime.fromtimestamp(begin).strftime('%H:%M:%S')}--------------")
     request = request or {}
     start_time = start_time or time.time()
 
@@ -27,6 +28,8 @@ async def move(src_bundle, dest_bundle, request=None, start_time=None, **kwargs)
     metadata, errors = None, []
     try:
         metadata, created = await src_provider.move(dest_provider, src_path, dest_path, **kwargs)
+        logger.info(f"--------------End move : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S')}--------------")
+        logger.info(f"--------------Total time move : {datetime.datetime.fromtimestamp(time.time() - begin).strftime('%H:%M:%S')}--------------")
     except Exception as e:
         logger.error('Move failed with error {!r}'.format(e))
         errors = [e.__repr__()]

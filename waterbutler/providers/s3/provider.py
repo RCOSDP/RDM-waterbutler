@@ -22,6 +22,7 @@ from waterbutler.providers.s3.metadata import (S3Revision,
                                                S3FolderKeyMetadata,
                                                S3FileMetadataHeaders,
                                                )
+import datetime, time
 
 logger = logging.getLogger(__name__)
 
@@ -239,13 +240,28 @@ class S3Provider(provider.BaseProvider):
         """
 
         # Step 1. Create a multi-part upload session
+        begin = time.time()
+        logger.info(f"--------------Begin _create_upload_session : {datetime.datetime.fromtimestamp(begin).strftime('%H:%M:%S')}--------------")
         session_upload_id = await self._create_upload_session(path)
+        logger.info(f"--------------End _create_upload_session : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S')}--------------")
+        logger.info(f"--------------Total time _create_upload_session : {datetime.datetime.fromtimestamp(time.time() - begin).strftime('%H:%M:%S')}--------------")
+
 
         try:
             # Step 2. Break stream into chunks and upload them one by one
+            begin = time.time()
+            logger.info(f"--------------Begin _upload_parts : {datetime.datetime.fromtimestamp(begin).strftime('%H:%M:%S')}--------------")
             parts_metadata = await self._upload_parts(stream, path, session_upload_id)
+            logger.info(f"--------------End _upload_parts : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S')}--------------")
+            logger.info(f"--------------Total time _upload_parts : {datetime.datetime.fromtimestamp(time.time() - begin).strftime('%H:%M:%S')}--------------")
+
             # Step 3. Commit the parts and end the upload session
+            begin = time.time()
+            logger.info(f"--------------Begin _complete_multipart_upload : {datetime.datetime.fromtimestamp(begin).strftime('%H:%M:%S')}--------------")
             await self._complete_multipart_upload(path, session_upload_id, parts_metadata)
+            logger.info(f"--------------End _complete_multipart_upload : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S')}--------------")
+            logger.info(f"--------------Total time _complete_multipart_upload : {datetime.datetime.fromtimestamp(time.time() - begin).strftime('%H:%M:%S')}--------------")
+
         except Exception as err:
             msg = 'An unexpected error has occurred during the multi-part upload.'
             logger.error('{} upload_id={} error={!r}'.format(msg, session_upload_id, err))
@@ -296,13 +312,27 @@ class S3Provider(provider.BaseProvider):
 
         metadata = []
         parts = [self.CHUNK_SIZE for i in range(0, stream.size // self.CHUNK_SIZE)]
+        results = {}
         if stream.size % self.CHUNK_SIZE:
             parts.append(stream.size - (len(parts) * self.CHUNK_SIZE))
         logger.debug('Multipart upload segment sizes: {}'.format(parts))
         for chunk_number, chunk_size in enumerate(parts):
+            begin = time.time()
+            logger.info(f"--------------Begin {chunk_number + 1} : {datetime.datetime.fromtimestamp(begin).strftime('%H:%M:%S')}--------------")
             logger.debug('  uploading part {} with size {}'.format(chunk_number + 1, chunk_size))
             metadata.append(await self._upload_part(stream, path, session_upload_id,
                                                     chunk_number + 1, chunk_size))
+            logger.info(f"--------------End {chunk_number + 1} : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S')}--------------")
+            result = time.time() - begin
+            results[chunk_number + 1] = result
+            logger.info(f"--------------Total time {chunk_number + 1} : {datetime.datetime.fromtimestamp(result).strftime('%H:%M:%S')}--------------")
+            result = time.time() - begin
+            results[chunk_number + 1] = result
+
+        logger.info(f'results: {results}')
+        logger.warning(f"min results has key is {min(results, key=results.get)} and min value is {datetime.datetime.fromtimestamp(results[min(results, key=results.get)]).strftime('%H:%M:%S')}")
+        logger.warning(f"max results has key is {max(results, key=results.get)} and max value is {datetime.datetime.fromtimestamp(results[max(results, key=results.get)]).strftime('%H:%M:%S')}")
+        logger.warning(f"average results = {datetime.datetime.fromtimestamp(sum(results.values())/len(results)).strftime('%H:%M:%S')}")
         return metadata
 
     async def _upload_part(self, stream, path, session_upload_id, chunk_number, chunk_size):

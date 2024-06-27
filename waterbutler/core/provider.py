@@ -22,6 +22,8 @@ from waterbutler.core import metadata as wb_metadata
 from waterbutler.core.utils import ZipStreamGenerator
 from waterbutler.core.utils import RequestHandlerContext
 
+import datetime
+import time
 
 logger = logging.getLogger(__name__)
 _THROTTLES = weakref.WeakKeyDictionary()  # type: weakref.WeakKeyDictionary
@@ -335,6 +337,9 @@ class BaseProvider(metaclass=abc.ABCMeta):
                     raise unexpected
                 return response
             except throws as e:
+                logger.error('error={!r}'.format(e))
+                begin = time.time()
+                logger.info(f"--------------Begin retry : {datetime.datetime.fromtimestamp(begin).strftime('%H:%M:%S')}--------------")
                 self.provider_metrics.incr('requests.tally.nok')
                 if retry <= 0 or e.code not in force_retry_on.union(self._retry_on):
                     raise
@@ -342,6 +347,8 @@ class BaseProvider(metaclass=abc.ABCMeta):
                 sleep_seconds = (1 + _retry - retry) * 2
                 await asyncio.sleep(sleep_seconds)
                 retry -= 1
+                logger.info(f"--------------End retry : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S')}--------------")
+                logger.info(f"--------------Total time retry : {datetime.datetime.fromtimestamp(time.time() - begin).strftime('%H:%M:%S')}--------------")
 
     def request(self, *args, **kwargs):
         return RequestHandlerContext(self.make_request(*args, **kwargs))
@@ -364,6 +371,8 @@ class BaseProvider(metaclass=abc.ABCMeta):
         :param conflict: ( :class:`str` ) What to do in the event of a name conflict, ``replace`` or ``keep``
         :param handle_naming: ( :class:`bool` ) If a naming conflict is detected, should it be automatically handled?
         """
+        begin = time.time()
+        logger.info(f"--------------Begin move in wb core : {datetime.datetime.fromtimestamp(begin).strftime('%H:%M:%S')}--------------")
         args = (dest_provider, src_path, dest_path)
         kwargs = {'rename': rename, 'conflict': conflict}
 
@@ -398,11 +407,20 @@ class BaseProvider(metaclass=abc.ABCMeta):
         if src_path.is_dir:
             meta_data, created = await self._folder_file_op(self.move, *args, **kwargs)  # type: ignore
         else:
+            begin = time.time()
+            logger.info(f"--------------Begin copy in wb core : {datetime.datetime.fromtimestamp(begin).strftime('%H:%M:%S')}--------------")
             meta_data, created = await self.copy(*args, handle_naming=False, **kwargs)  # type: ignore
+            logger.info(f"--------------End copy in wb core : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S')}--------------")
+            logger.info(f"--------------Total time copy in wb core : {datetime.datetime.fromtimestamp(time.time() - begin).strftime('%H:%M:%S')}--------------")
 
         try:
+            begin = time.time()
+            logger.info(f"--------------Begin delete in wb core : {datetime.datetime.fromtimestamp(begin).strftime('%H:%M:%S')}--------------")
             await self.delete(src_path)
+            logger.info(f"--------------End delete in wb core : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S')}--------------")
+            logger.info(f"--------------Total time delete in wb core : {datetime.datetime.fromtimestamp(time.time() - begin).strftime('%H:%M:%S')}--------------")
         except exceptions.ProviderError as e:
+            logger.error('error_delete={!r}'.format(e))
             if e.code != 404:
                 raise
 
