@@ -24,7 +24,8 @@ from waterbutler.providers.s3compat.metadata import (S3CompatRevision,
                                                      S3CompatFolderKeyMetadata,
                                                      S3CompatFileMetadataHeaders,
                                                      )
-import datetime, time
+import datetime
+import time
 logger = logging.getLogger(__name__)
 
 

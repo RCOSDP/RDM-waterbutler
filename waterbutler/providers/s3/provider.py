@@ -22,7 +22,8 @@ from waterbutler.providers.s3.metadata import (S3Revision,
                                                S3FolderKeyMetadata,
                                                S3FileMetadataHeaders,
                                                )
-import datetime, time
+import datetime
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -245,7 +246,6 @@ class S3Provider(provider.BaseProvider):
         session_upload_id = await self._create_upload_session(path)
         logger.info(f"--------------End _create_upload_session : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S')}--------------")
         logger.info(f"--------------Total time _create_upload_session : {datetime.datetime.fromtimestamp(time.time() - begin).strftime('%H:%M:%S')}--------------")
-
 
         try:
             # Step 2. Break stream into chunks and upload them one by one
