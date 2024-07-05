@@ -297,6 +297,68 @@ class TestCRUD:
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
+    async def test_chunked_upload_create_upload_session_retry(self, provider, provider_fixtures, error_fixtures):
+
+        url = provider._build_content_url('files', 'upload_session', 'start')
+
+        too_many_request_response = {
+                    'headers': {'Content-Type': 'application/json'},
+                    'body': json.dumps(
+                                error_fixtures['too_many_requests_error']
+                            ).encode('utf-8'),
+                    'status': HTTPStatus.TOO_MANY_REQUESTS
+                }
+        aiohttpretty.register_json_uri('POST', url, **{
+            "responses": [
+                too_many_request_response,
+                too_many_request_response,
+                too_many_request_response,
+                too_many_request_response,
+                {
+                    'headers': {'Content-Type': 'application/json'},
+                    'body':  json.dumps(provider_fixtures.get('session_metadata', '')).encode('utf-8'),
+                    'status': HTTPStatus.OK
+                },
+            ]
+        })
+
+        session_id = await provider._create_upload_session()
+
+        assert session_id == provider_fixtures['session_metadata']['session_id']
+        assert aiohttpretty.has_call(method='POST', uri=url)
+        assert len(aiohttpretty.calls) == 5
+
+    @pytest.mark.asyncio
+    @pytest.mark.aiohttpretty
+    async def test_chunked_upload_create_upload_session_not_retry(self, provider, provider_fixtures, error_fixtures):
+
+        url = provider._build_content_url('files', 'upload_session', 'start')
+
+        conflict_response = {
+                    'headers': {'Content-Type': 'application/json'},
+                    'body': json.dumps(error_fixtures['rename_conflict_file_metadata']).encode('utf-8'),
+                    'status': HTTPStatus.CONFLICT
+                }
+        aiohttpretty.register_json_uri('POST', url, **{
+            "responses": [
+                conflict_response,
+                conflict_response,
+                conflict_response,
+                conflict_response,
+                {
+                    'headers': {'Content-Type': 'application/json'},
+                    'body':  json.dumps(provider_fixtures.get('session_metadata', '')).encode('utf-8'),
+                    'status': HTTPStatus.OK
+                },
+            ]
+        })
+        with pytest.raises(core_exceptions.UploadError):
+            await provider._create_upload_session()
+        assert aiohttpretty.has_call(method='POST', uri=url)
+        assert len(aiohttpretty.calls) == 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.aiohttpretty
     async def test_chunked_upload_upload_parts(self, provider, file_stream, provider_fixtures):
 
         assert file_stream.size == 38
@@ -366,6 +428,82 @@ class TestCRUD:
 
         assert metadata == provider_fixtures['file_metadata']
         assert aiohttpretty.has_call(method='POST', uri=complete_part_url)
+
+        provider.CHUNK_SIZE = CHUNK_SIZE
+
+    @pytest.mark.asyncio
+    @pytest.mark.aiohttpretty
+    async def test_complete_session_retry(self, provider, file_stream, provider_fixtures, error_fixtures):
+
+        assert file_stream.size == 38
+        provider.CHUNK_SIZE = 4
+
+        path = WaterButlerPath('/foobah')
+        session_id = provider_fixtures['session_metadata']['session_id']
+
+        complete_part_url = provider._build_content_url('files', 'upload_session', 'finish')
+        too_many_request_response = {
+                    'headers': {'Content-Type': 'application/json'},
+                    'body': json.dumps(
+                                error_fixtures['too_many_requests_error']
+                            ).encode('utf-8'),
+                    'status': HTTPStatus.TOO_MANY_REQUESTS
+                }
+        aiohttpretty.register_json_uri('POST', complete_part_url, **{
+            "responses": [
+                too_many_request_response,
+                too_many_request_response,
+                too_many_request_response,
+                too_many_request_response,
+                {
+                    'headers': {'Content-Type': 'application/json'},
+                    'body':  json.dumps(provider_fixtures.get('file_metadata', None)).encode('utf-8'),
+                    'status': HTTPStatus.OK
+                },
+            ]
+        })
+        metadata = await provider._complete_session(file_stream, session_id, path)
+
+        assert metadata == provider_fixtures['file_metadata']
+        assert aiohttpretty.has_call(method='POST', uri=complete_part_url)
+        assert len(aiohttpretty.calls) == 5
+
+        provider.CHUNK_SIZE = CHUNK_SIZE
+
+    @pytest.mark.asyncio
+    @pytest.mark.aiohttpretty
+    async def test_complete_session_not_retry(self, provider, file_stream, provider_fixtures, error_fixtures):
+
+        assert file_stream.size == 38
+        provider.CHUNK_SIZE = 4
+
+        path = WaterButlerPath('/foobah')
+        session_id = provider_fixtures['session_metadata']['session_id']
+
+        complete_part_url = provider._build_content_url('files', 'upload_session', 'finish')
+        conflict_response = {
+                    'headers': {'Content-Type': 'application/json'},
+                    'body': json.dumps(error_fixtures['rename_conflict_file_metadata']).encode('utf-8'),
+                    'status': HTTPStatus.CONFLICT
+                }
+        aiohttpretty.register_json_uri('POST', complete_part_url, **{
+            "responses": [
+                conflict_response,
+                conflict_response,
+                conflict_response,
+                conflict_response,
+                {
+                    'headers': {'Content-Type': 'application/json'},
+                    'body':  json.dumps(provider_fixtures.get('file_metadata', None)).encode('utf-8'),
+                    'status': HTTPStatus.OK
+                },
+            ]
+        })
+        with pytest.raises(core_exceptions.UploadError):
+            await provider._complete_session(file_stream, session_id, path)
+
+        assert aiohttpretty.has_call(method='POST', uri=complete_part_url)
+        assert len(aiohttpretty.calls) == 1
 
         provider.CHUNK_SIZE = CHUNK_SIZE
 
@@ -808,11 +946,6 @@ class TestIntraMoveCopy:
         aiohttpretty.register_json_uri('POST', url, **{
             "responses": [
                 conflict_response,
-                conflict_response,
-                conflict_response,
-                conflict_response,
-                conflict_response,
-                conflict_response,
                 {
                     'headers': {'Content-Type': 'application/json'},
                     'data': data,
@@ -965,11 +1098,6 @@ class TestIntraMoveCopy:
         aiohttpretty.register_json_uri('POST', url, **{
             "responses": [
                 conflict_response,
-                conflict_response,
-                conflict_response,
-                conflict_response,
-                conflict_response,
-                conflict_response,
                 {
                     'headers': {'Content-Type': 'application/json'},
                     'data': data,
@@ -1055,6 +1183,112 @@ class TestIntraMoveCopy:
             await provider.intra_move(provider, src_path, dest_path)
 
         assert e.value.code == HTTPStatus.BAD_REQUEST
+
+    @pytest.mark.asyncio
+    @pytest.mark.aiohttpretty
+    async def test_intra_copy_retry(
+            self,
+            provider,
+            provider_fixtures,
+            error_fixtures
+    ):
+        src_path = WaterButlerPath('/pfile', prepend=provider.folder)
+        dest_path = WaterButlerPath('/pfile_renamed', prepend=provider.folder)
+
+        url = provider.build_url('files', 'copy_v2')
+        data = {
+            'from_path': src_path.full_path.rstrip('/'),
+            'to_path': dest_path.full_path.rstrip('/')
+        }
+        too_many_request_response = {
+                    'headers': {'Content-Type': 'application/json'},
+                    'data': data,
+                    'body': json.dumps(
+                                error_fixtures['too_many_requests_error']
+                            ).encode('utf-8'),
+                    'status': HTTPStatus.TOO_MANY_REQUESTS
+                }
+        aiohttpretty.register_json_uri('POST', url, **{
+            "responses": [
+                too_many_request_response,
+                too_many_request_response,
+                too_many_request_response,
+                too_many_request_response,
+                too_many_request_response,
+                {
+                    'headers': {'Content-Type': 'application/json'},
+                    'data': data,
+                    'body': json.dumps(
+                                provider_fixtures['intra_move_copy_file_metadata_v2']
+                            ).encode('utf-8')
+                },
+            ]
+        })
+
+        result = await provider.intra_copy(provider, src_path, dest_path)
+        expected = (
+            DropboxFileMetadata(
+                provider_fixtures['intra_move_copy_file_metadata_v2']['metadata'],
+                provider.folder, provider.NAME
+            ),
+            True
+        )
+
+        assert expected == result
+        assert len(aiohttpretty.calls) == 6
+
+    @pytest.mark.asyncio
+    @pytest.mark.aiohttpretty
+    async def test_intra_move_retry(
+            self,
+            provider,
+            provider_fixtures,
+            error_fixtures
+    ):
+        src_path = WaterButlerPath('/pfile', prepend=provider.folder)
+        dest_path = WaterButlerPath('/pfile_renamed', prepend=provider.folder)
+
+        url = provider.build_url('files', 'move_v2')
+        data = {
+            'from_path': src_path.full_path.rstrip('/'),
+            'to_path': dest_path.full_path.rstrip('/')
+        }
+        too_many_request_response = {
+                    'headers': {'Content-Type': 'application/json'},
+                    'data': data,
+                    'body': json.dumps(
+                                error_fixtures['too_many_requests_error']
+                            ).encode('utf-8'),
+                    'status': HTTPStatus.TOO_MANY_REQUESTS
+                }
+        aiohttpretty.register_json_uri('POST', url, **{
+            "responses": [
+                too_many_request_response,
+                too_many_request_response,
+                too_many_request_response,
+                too_many_request_response,
+                too_many_request_response,
+                {
+                    'headers': {'Content-Type': 'application/json'},
+                    'data': data,
+                    'body': json.dumps(
+                                provider_fixtures['intra_move_copy_file_metadata_v2']
+                            ).encode('utf-8')
+                },
+            ]
+        })
+
+        result = await provider.intra_move(provider, src_path, dest_path)
+        expected = (
+            DropboxFileMetadata(
+                provider_fixtures['intra_move_copy_file_metadata_v2']['metadata'],
+                provider.folder, provider.NAME
+            ),
+            True
+        )
+
+        assert expected == result
+        assert len(aiohttpretty.calls) == 6
 
 
 class TestOperations:
