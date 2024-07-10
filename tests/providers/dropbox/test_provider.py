@@ -750,8 +750,52 @@ class TestIntraMoveCopy:
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
     async def test_intra_copy_file(self, provider, provider_fixtures):
-        src_path = WaterButlerPath('/pfile', prepend=provider.folder)
-        dest_path = WaterButlerPath('/pfile_renamed', prepend=provider.folder)
+        url_get_current_account = provider.build_url('users', 'get_current_account')
+        aiohttpretty.register_json_uri(
+            'POST',
+            url_get_current_account,
+            data=None,
+            body=provider_fixtures['intra_move_copy_get_current_account']
+        )
+        provider.team_folder_name = 'provider_team_folder_name'
+        src_path = WaterButlerPath('/pfile/Prime_Numbers.txt', prepend=provider.folder)
+        dest_path = WaterButlerPath('/pfile_renamed/Prime_Numbers.txt', prepend=provider.folder)
+
+        url = provider.build_url('files', 'copy_v2')
+        data = {
+            'from_path': src_path.full_path.rstrip('/'),
+            'to_path': dest_path.full_path.rstrip('/')
+        },
+        aiohttpretty.register_json_uri(
+            'POST',
+            url,
+            data=data,
+            body=provider_fixtures['intra_move_copy_file_metadata_v2']
+        )
+
+        result = await provider.intra_copy(provider, src_path, dest_path)
+        expected = (
+            DropboxFileMetadata(
+                provider_fixtures['intra_move_copy_file_metadata_v2']['metadata'],
+                provider.folder, provider.NAME
+            ),
+            True
+        )
+
+        assert result == expected
+
+    @pytest.mark.asyncio
+    @pytest.mark.aiohttpretty
+    async def test_intra_copy_file_without_team_folder_name(self, provider, provider_fixtures):
+        url_get_current_account = provider.build_url('users', 'get_current_account')
+        aiohttpretty.register_json_uri(
+            'POST',
+            url_get_current_account,
+            data=None,
+            body=provider_fixtures['intra_move_copy_get_current_account']
+        )
+        src_path = WaterButlerPath('/pfile/Prime_Numbers.txt', prepend=provider.folder)
+        dest_path = WaterButlerPath('/pfile_renamed/Prime_Numbers.txt', prepend=provider.folder)
 
         url = provider.build_url('files', 'copy_v2')
         data = {
@@ -784,13 +828,21 @@ class TestIntraMoveCopy:
             provider_fixtures,
             error_fixtures
     ):
+        url_get_current_account = provider.build_url('users', 'get_current_account')
+        aiohttpretty.register_json_uri(
+            'POST',
+            url_get_current_account,
+            data=None,
+            body=provider_fixtures['intra_move_copy_get_current_account']
+        )
         url = provider.build_url('files', 'delete_v2')
         path = await provider.validate_path('/The past')
         data = {'path': path.full_path}
         aiohttpretty.register_json_uri('POST', url, data=data, status=HTTPStatus.OK)
 
-        src_path = WaterButlerPath('/pfile', prepend=provider.folder)
-        dest_path = WaterButlerPath('/pfile_renamed', prepend=provider.folder)
+        provider.team_folder_name = 'provider_team_folder_name'
+        src_path = WaterButlerPath('/pfile/Prime_Numbers.txt', prepend=provider.folder)
+        dest_path = WaterButlerPath('/pfile_renamed/Prime_Numbers.txt', prepend=provider.folder)
 
         url = provider.build_url('files', 'copy_v2')
         data = {
@@ -874,6 +926,15 @@ class TestIntraMoveCopy:
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
     async def test_intra_copy_folder(self, provider, provider_fixtures):
+        url_get_current_account = provider.build_url('users', 'get_current_account')
+        aiohttpretty.register_json_uri(
+            'POST',
+            url_get_current_account,
+            data=None,
+            body=provider_fixtures['intra_move_copy_get_current_account']
+        )
+
+        provider.team_folder_name = 'provider_team_folder_name'
         src_path = WaterButlerPath('/pfile/', prepend=provider.folder)
         dest_path = WaterButlerPath('/pfile_renamed/', prepend=provider.folder)
 
@@ -914,10 +975,54 @@ class TestIntraMoveCopy:
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
     async def test_intra_move_file(self, provider, provider_fixtures):
-        src_path = WaterButlerPath('/pfile', prepend=provider.folder)
-        dest_path = WaterButlerPath('/pfile_renamed', prepend=provider.folder)
+        provider.team_folder_name = 'provider_team_folder_name'
+        src_path = WaterButlerPath('/pfile/Prime_Numbers.txt', prepend=provider.folder)
+        dest_path = WaterButlerPath('/pfile_renamed/Prime_Numbers.txt', prepend=provider.folder)
 
         url = provider.build_url('files', 'move_v2')
+        url_get_current_account = provider.build_url('users', 'get_current_account')
+        aiohttpretty.register_json_uri(
+            'POST',
+            url_get_current_account,
+            data=None,
+            body=provider_fixtures['intra_move_copy_get_current_account']
+        )
+        data = {
+            'from_path': src_path.full_path.rstrip('/'),
+            'to_path': dest_path.full_path.rstrip('/')
+        }
+        aiohttpretty.register_json_uri(
+            'POST',
+            url,
+            data=data,
+            body=provider_fixtures['intra_move_copy_file_metadata_v2']
+        )
+
+        result = await provider.intra_move(provider, src_path, dest_path)
+        expected = (
+            DropboxFileMetadata(
+                provider_fixtures['intra_move_copy_file_metadata_v2']['metadata'],
+                provider.folder, provider.NAME
+            ),
+            True
+        )
+
+        assert result == expected
+
+    @pytest.mark.asyncio
+    @pytest.mark.aiohttpretty
+    async def test_intra_move_file_without_team_folder_name(self, provider, provider_fixtures):
+        src_path = WaterButlerPath('/pfile/Prime_Numbers.txt', prepend=provider.folder)
+        dest_path = WaterButlerPath('/pfile_renamed/Prime_Numbers.txt', prepend=provider.folder)
+
+        url = provider.build_url('files', 'move_v2')
+        url_get_current_account = provider.build_url('users', 'get_current_account')
+        aiohttpretty.register_json_uri(
+            'POST',
+            url_get_current_account,
+            data=None,
+            body=provider_fixtures['intra_move_copy_get_current_account']
+        )
         data = {
             'from_path': src_path.full_path.rstrip('/'),
             'to_path': dest_path.full_path.rstrip('/')
@@ -943,13 +1048,21 @@ class TestIntraMoveCopy:
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
     async def test_intra_move_replace_file(self, provider, provider_fixtures, error_fixtures):
+        url_get_current_account = provider.build_url('users', 'get_current_account')
+        aiohttpretty.register_json_uri(
+            'POST',
+            url_get_current_account,
+            data=None,
+            body=provider_fixtures['intra_move_copy_get_current_account']
+        )
         url = provider.build_url('files', 'delete_v2')
         path = await provider.validate_path('/The past')
         data = {'path': path.full_path}
         aiohttpretty.register_json_uri('POST', url, data=data, status=HTTPStatus.OK)
 
-        src_path = WaterButlerPath('/pfile', prepend=provider.folder)
-        dest_path = WaterButlerPath('/pfile_renamed', prepend=provider.folder)
+        provider.team_folder_name = 'provider_team_folder_name'
+        src_path = WaterButlerPath('/pfile/Prime_Numbers.txt', prepend=provider.folder)
+        dest_path = WaterButlerPath('/pfile_renamed/Prime_Numbers.txt', prepend=provider.folder)
 
         url = provider.build_url('files', 'move_v2')
         data = {
@@ -993,6 +1106,14 @@ class TestIntraMoveCopy:
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
     async def test_intra_move_replace_folder(self, provider, provider_fixtures, error_fixtures):
+        url_get_current_account = provider.build_url('users', 'get_current_account')
+        aiohttpretty.register_json_uri(
+            'POST',
+            url_get_current_account,
+            data=None,
+            body=provider_fixtures['intra_move_copy_get_current_account']
+        )
+
         url = provider.build_url('files', 'delete_v2')
         path = await provider.validate_path('/newfolder/')
         data = {'path': path.full_path}
@@ -1008,6 +1129,7 @@ class TestIntraMoveCopy:
             status=HTTPStatus.OK
         )
 
+        provider.team_folder_name = 'provider_team_folder_name'
         src_path = WaterButlerPath('/pfile/', prepend=provider.folder)
         dest_path = WaterButlerPath('/pfile_renamed/', prepend=provider.folder)
 
