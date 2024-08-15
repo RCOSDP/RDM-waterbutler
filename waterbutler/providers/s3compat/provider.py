@@ -381,7 +381,7 @@ class S3CompatProvider(provider.BaseProvider):
             headers = {'x-amz-server-side-encryption': 'AES256'}
         params = {'uploads': ''}
         upload_url = functools.partial(
-            self.bucket.new_key(path.path).generate_url,
+            self.bucket.new_key(path.full_path).generate_url,
             settings.TEMP_URL_SECS,
             'POST',
             query_parameters=params,
@@ -430,7 +430,7 @@ class S3CompatProvider(provider.BaseProvider):
             'uploadId': session_upload_id,
         }
         upload_url = functools.partial(
-            self.bucket.new_key(path.path).generate_url,
+            self.bucket.new_key(path.full_path).generate_url,
             settings.TEMP_URL_SECS,
             'PUT',
             query_parameters=params,
@@ -471,7 +471,7 @@ class S3CompatProvider(provider.BaseProvider):
         headers = {}
         params = {'uploadId': session_upload_id}
         abort_url = functools.partial(
-            self.bucket.new_key(path.path).generate_url,
+            self.bucket.new_key(path.full_path).generate_url,
             settings.TEMP_URL_SECS,
             'DELETE',
             query_parameters=params,
@@ -532,7 +532,7 @@ class S3CompatProvider(provider.BaseProvider):
         headers = {}
         params = {'uploadId': session_upload_id}
         list_url = functools.partial(
-            self.bucket.new_key(path.path).generate_url,
+            self.bucket.new_key(path.full_path).generate_url,
             settings.TEMP_URL_SECS,
             'GET',
             query_parameters=params,
@@ -576,7 +576,7 @@ class S3CompatProvider(provider.BaseProvider):
         }
         params = {'uploadId': session_upload_id}
         complete_url = functools.partial(
-            self.bucket.new_key(path.path).generate_url,
+            self.bucket.new_key(path.full_path).generate_url,
             settings.TEMP_URL_SECS,
             'POST',
             query_parameters=params,
