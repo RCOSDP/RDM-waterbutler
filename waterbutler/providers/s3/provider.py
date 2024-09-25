@@ -342,11 +342,11 @@ class S3Provider(provider.BaseProvider):
         """
 
         begin = time.time()
-        logger.info(f"=====Begin_cutoffStream: {chunk_number + 1} : {datetime.datetime.fromtimestamp(begin).strftime('%H:%M:%S')}--------------")
+        logger.info(f"=====Begin_cutoffStream: {chunk_number} : {datetime.datetime.fromtimestamp(begin).strftime('%H:%M:%S')}--------------")
         cutoff_stream = streams.CutoffStream(stream, cutoff=chunk_size)
-        logger.info(f"=====End_cutoffStream {chunk_number + 1} : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S')}--------------")
+        logger.info(f"=====End_cutoffStream {chunk_number} : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S')}--------------")
         result = time.time() - begin
-        logger.info(f"=====Total time cutoffStream {chunk_number + 1} : {datetime.datetime.fromtimestamp(result).strftime('%H:%M:%S')}--------------")
+        logger.info(f"=====Total time cutoffStream {chunk_number} : {datetime.datetime.fromtimestamp(result).strftime('%H:%M:%S')}--------------")
 
         headers = {'Content-Length': str(chunk_size)}
         params = {
@@ -362,7 +362,7 @@ class S3Provider(provider.BaseProvider):
         )
 
         begin_2 = time.time()
-        logger.info(f">>>>>>>Begin_PUT {chunk_number + 1} : {datetime.datetime.fromtimestamp(begin_2).strftime('%H:%M:%S')}--------------")
+        logger.info(f">>>>>>>Begin_PUT {chunk_number} : {datetime.datetime.fromtimestamp(begin_2).strftime('%H:%M:%S')}--------------")
         resp = await self.make_request(
             'PUT',
             upload_url,
@@ -374,9 +374,9 @@ class S3Provider(provider.BaseProvider):
             throws=exceptions.UploadError,
         )
         await resp.release()
-        logger.info(f"=====End_PUT {chunk_number + 1} : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S')}--------------")
+        logger.info(f">>>>>>>>End_PUT {chunk_number} : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S')}--------------")
         result_2 = time.time() - begin_2
-        logger.info(f"=====Total time cutoffStream {chunk_number + 1} : {datetime.datetime.fromtimestamp(result_2).strftime('%H:%M:%S')}--------------")
+        logger.info(f">>>>>>>>Total time PUT {chunk_number} : {datetime.datetime.fromtimestamp(result_2).strftime('%H:%M:%S')}--------------")
         return resp.headers
 
     async def _abort_chunked_upload(self, path, session_upload_id):
