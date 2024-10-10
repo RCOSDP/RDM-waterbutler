@@ -1,4 +1,4 @@
-FROM python:3.6-slim-buster
+FROM python:3.7-slim-bookworm
 
 RUN usermod -d /home www-data && chown www-data:www-data /home
 
@@ -14,7 +14,7 @@ RUN apt-get update \
         build-essential \
         libssl-dev \
         libffi-dev \
-        python-dev \
+        python-dev-is-python3 \
         gnupg2 \
         # grab gosu for easy step-down from root
         gosu \
@@ -25,8 +25,8 @@ RUN apt-get update \
 RUN mkdir -p /code
 WORKDIR /code
 
-RUN pip install -U pip==20.2
-RUN pip install setuptools==37.0.0
+RUN pip install --upgrade pip
+RUN pip install setuptools
 
 COPY ./requirements.txt /code/
 
