@@ -109,6 +109,12 @@ class OneDriveFileMetadata(BaseOneDriveMetadata, metadata.BaseFileMetadata):
                 return self.raw['package']['type']
         return None
 
+    @property
+    def extra(self):
+        return dict(super().extra, **{
+            'hashes': self.raw.get('file', {}).get('hashes'),
+        })
+
 
 class OneDriveRevisionMetadata(metadata.BaseFileRevisionMetadata):
 
@@ -123,3 +129,9 @@ class OneDriveRevisionMetadata(metadata.BaseFileRevisionMetadata):
     @property
     def modified(self):
         return self.raw['lastModifiedDateTime']
+
+    @property
+    def extra(self):
+        return dict(super().extra, **{
+            'size': int(self.raw.get('size')),
+        })

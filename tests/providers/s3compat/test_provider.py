@@ -16,6 +16,7 @@ from boto.utils import compute_md5
 
 from waterbutler.core import streams, metadata, exceptions
 from waterbutler.core.path import WaterButlerPath
+from waterbutler.core.utils import make_disposition
 from waterbutler.providers.s3compat import S3CompatProvider
 from waterbutler.providers.s3compat import settings as pd_settings
 
@@ -761,9 +762,10 @@ class TestCRUD:
         head_url = generate_url(100, 'HEAD')
         aiohttpretty.register_uri('HEAD', head_url, headers=file_header_metadata)
 
-        response_headers = {'response-content-disposition': 'attachment'}
+        response_headers = {'response-content-disposition': make_disposition(path.name)}
         get_url = generate_url(100, response_headers=response_headers)
-        aiohttpretty.register_uri('GET', get_url[:get_url.index('?')],
+        get_url = get_url if provider.NAME == 's3compatinstitutions' else get_url[:get_url.index('?')]
+        aiohttpretty.register_uri('GET', get_url,
                                   body=b'delicious', headers=file_header_metadata, auto_length=True)
 
         result = await provider.download(path)
@@ -781,9 +783,10 @@ class TestCRUD:
         head_url = generate_url(100, 'HEAD')
         aiohttpretty.register_uri('HEAD', head_url, headers=file_header_metadata)
 
-        response_headers = {'response-content-disposition': 'attachment;'}
+        response_headers = {'response-content-disposition': make_disposition(path.name)}
         get_url = generate_url(100, response_headers=response_headers)
-        aiohttpretty.register_uri('GET', get_url[:get_url.index('?')],
+        get_url = get_url if provider.NAME == 's3compatinstitutions' else get_url[:get_url.index('?')]
+        aiohttpretty.register_uri('GET', get_url,
                                   body=b'de', auto_length=True, status=206)
 
         result = await provider.download(path, range=(0, 1))
@@ -792,7 +795,7 @@ class TestCRUD:
         content_size = result._size
         assert content == b'de'
         assert content_size == 2
-        assert aiohttpretty.has_call(method='GET', uri=get_url[:get_url.index('?')])
+        assert aiohttpretty.has_call(method='GET', uri=get_url)
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
@@ -807,12 +810,13 @@ class TestCRUD:
         get_url = generate_url(
             100,
             query_parameters=versionid_parameter,
-            response_headers={'response-content-disposition': 'attachment'},
+            response_headers={'response-content-disposition': make_disposition(path.name)},
         )
-        aiohttpretty.register_uri('GET', get_url[:get_url.index('?')],
+        get_url = get_url if provider.NAME == 's3compatinstitutions' else get_url[:get_url.index('?')]
+        aiohttpretty.register_uri('GET', get_url,
                                   body=b'delicious', auto_length=True)
 
-        result = await provider.download(path, version='someversion')
+        result = await provider.download(path, revision='someversion')
         content = await result.read()
 
         assert content == b'delicious'
@@ -832,11 +836,11 @@ class TestCRUD:
         aiohttpretty.register_uri('HEAD', head_url, headers={'Content-Length': '9'})
 
         response_headers = {
-            'response-content-disposition':
-            'attachment; filename="{}"; filename*=UTF-8''{}'.format(expected_name, expected_name)
+            'response-content-disposition': make_disposition(expected_name)
         }
         get_url = generate_url(100, response_headers=response_headers)
-        aiohttpretty.register_uri('GET', get_url[:get_url.index('?')],
+        get_url = get_url if provider.NAME == 's3compatinstitutions' else get_url[:get_url.index('?')]
+        aiohttpretty.register_uri('GET', get_url,
                                   body=b'delicious', auto_length=True)
 
         result = await provider.download(path, display_name=display_name_arg)
@@ -853,9 +857,10 @@ class TestCRUD:
         head_url = generate_url(100, 'HEAD')
         aiohttpretty.register_uri('HEAD', head_url, status=404)
 
-        response_headers = {'response-content-disposition': 'attachment'}
-        url = generate_url(100, response_headers=response_headers)
-        aiohttpretty.register_uri('GET', url[:url.index('?')], status=404)
+        response_headers = {'response-content-disposition': make_disposition(path.name)}
+        get_url = generate_url(100, response_headers=response_headers)
+        get_url = get_url if provider.NAME == 's3compatinstitutions' else get_url[:get_url.index('?')]
+        aiohttpretty.register_uri('GET', get_url, status=404)
 
         with pytest.raises(exceptions.DownloadError):
             await provider.download(path)
@@ -874,9 +879,10 @@ class TestCRUD:
         no_content_length_metadata = file_header_metadata.copy()
         del no_content_length_metadata['Content-Length']
 
-        response_headers = {'response-content-disposition': 'attachment'}
+        response_headers = {'response-content-disposition': make_disposition(path.name)}
         get_url = generate_url(100, response_headers=response_headers)
-        aiohttpretty.register_uri('GET', get_url[:get_url.index('?')],
+        get_url = get_url if provider.NAME == 's3compatinstitutions' else get_url[:get_url.index('?')]
+        aiohttpretty.register_uri('GET', get_url,
                                   body=b'delicious', headers=no_content_length_metadata)
 
         result = await provider.download(path)
@@ -897,9 +903,10 @@ class TestCRUD:
         head_url = generate_url(100, 'HEAD')
         aiohttpretty.register_uri('HEAD', head_url, headers=head_header_metadata)
 
-        response_headers = {'response-content-disposition': 'attachment'}
+        response_headers = {'response-content-disposition': make_disposition(path.name)}
         get_url = generate_url(100, response_headers=response_headers)
-        aiohttpretty.register_uri('GET', get_url[:get_url.index('?')],
+        get_url = get_url if provider.NAME == 's3compatinstitutions' else get_url[:get_url.index('?')]
+        aiohttpretty.register_uri('GET', get_url,
                                   body=b'delicious', headers=file_header_metadata, auto_length=True)
 
         result = await provider.download(path)
@@ -908,7 +915,7 @@ class TestCRUD:
         assert content == b'delicious'
         assert result._size == 9
         assert aiohttpretty.has_call(method='HEAD', uri=head_url)
-        assert aiohttpretty.has_call(method='GET', uri=get_url[:get_url.index('?')])
+        assert aiohttpretty.has_call(method='GET', uri=get_url)
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty

@@ -256,7 +256,11 @@ class S3CompatProvider(provider.BaseProvider):
         )
 
         headers = {}
-        raw_url = self.connection.add_auth('GET', url('GET'), headers)
+        if self.NAME == 's3compatinstitutions':
+            # Fix S3 Compatible for Institution for downloading data of file's previous version
+            raw_url = url('GET')
+        else:
+            raw_url = self.connection.add_auth('GET', url('GET'), headers)
 
         resp = await self.make_request(
             'GET',

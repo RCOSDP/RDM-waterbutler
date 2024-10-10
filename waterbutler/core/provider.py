@@ -453,7 +453,7 @@ class BaseProvider(metaclass=abc.ABCMeta):
         if src_path.is_dir:
             return await self._folder_file_op(self.copy, *args, **kwargs)  # type: ignore
 
-        download_stream = await self.download(src_path, version=version)
+        download_stream = await self.download(src_path, version=version, revision=version)
 
         if getattr(download_stream, 'name', None):
             dest_path.rename(download_stream.name)

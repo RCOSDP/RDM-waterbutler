@@ -1,3 +1,4 @@
+from unittest.mock import MagicMock, patch
 import pytest
 
 from tests.utils import MockCoroutine
@@ -6,7 +7,6 @@ import io
 import time
 import base64
 import hashlib
-from http import client
 from unittest import mock
 import asyncio
 
@@ -22,7 +22,7 @@ from waterbutler.core.path import WaterButlerPath
 
 from waterbutler.providers.s3compatb3 import S3CompatB3Provider
 from waterbutler.providers.s3compatb3.metadata import S3CompatB3FileMetadata
-from waterbutler.providers.s3compatb3.metadata import S3CompatB3FolderMetadata
+from hmac import compare_digest
 
 
 @pytest.fixture
@@ -635,6 +635,23 @@ class TestMetadata:
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
+    async def test_handle_data(self, provider):
+        data = ['txt001.txt', 'abc']
+        result, token = provider.handle_data(data)
+        assert compare_digest(token, 'abc')
+
+    @pytest.mark.asyncio
+    @pytest.mark.aiohttpretty
+    async def test_metadata__with_next_token(self, provider):
+        path = MagicMock(is_dir=True)
+        kwargs = {'next_token': 'token'}
+
+        with patch.object(provider, '_metadata_folder', new=MockCoroutine()) as mock_metadata_folder:
+            await provider.metadata(path, **kwargs)
+            mock_metadata_folder.assert_called_once_with(path, 'token')
+
+    @pytest.mark.asyncio
+    @pytest.mark.aiohttpretty
     async def test_metadata_folder(self, provider, folder_metadata, mock_time):
         path = WaterButlerPath('/darp/', prepend=provider.prefix)
         # url = provider.bucket.generate_url(100)
@@ -780,6 +797,28 @@ class TestMetadata:
         assert metadata.kind == 'file'
         assert created
         assert aiohttpretty.has_call(method='PUT', uri=url)
+
+    @pytest.mark.asyncio
+    @pytest.mark.aiohttpretty
+    async def test__metadata_folder__with_next_token(self, provider):
+        path = MagicMock(full_path='/')
+        kwargs = {'next_token': 'token'}
+
+        mock_list_objects_v2 = MagicMock()
+        mock_list_objects_v2.return_value = {
+            'NextContinuationToken': 'token2',
+        }
+        provider.connection.s3.meta.client.list_objects_v2 = mock_list_objects_v2
+        req_kwargs = {
+            'Bucket': provider.bucket.name,
+            'Prefix': path.full_path.lstrip('/'),
+            'Delimiter': '/',
+            'MaxKeys': 1000,
+            'ContinuationToken': 'token',
+        }
+        results = await provider._metadata_folder(path, **kwargs)
+        mock_list_objects_v2.assert_called_once_with(**req_kwargs)
+        assert results[-1] == 'token2'
 
 
 class TestCreateFolder:
