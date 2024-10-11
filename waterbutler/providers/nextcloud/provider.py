@@ -174,10 +174,19 @@ class NextcloudProvider(provider.BaseProvider):
             'got_range': range is not None,
         })
 
+        # Update our download request to Nextcloud to set the Accept-Encoding header
+        # to empty, so that they won't gzip files we want to download.
+        #
+        # Nextcloud started gzipping the response body of some download requests, but
+        # not others.  We set the Content-Length of our response based on the
+        # Content-Length Nextcloud sends us, but the Content-Length of the zipped
+        # files is the zipped size.  We were sending the unzipped content to
+        # the user with the zipped size, and the mismatch was causing Tornado to crash.
         if revision is None:
             download_resp = await self.make_request(
                 'GET',
                 self._webdav_url_ + path.full_path,
+                headers={'Accept-Encoding': ''},
                 range=range,
                 expects=(200, 206,),
                 throws=exceptions.DownloadError,
@@ -191,6 +200,7 @@ class NextcloudProvider(provider.BaseProvider):
             download_resp = await self.make_request(
                 'GET',
                 self._dav_url_ + 'versions/' + self.credentials['username'] + '/versions/' + fileid + '/' + etag,
+                headers={'Accept-Encoding': ''},
                 range=range,
                 expects=(200, 206,),
                 throws=exceptions.DownloadError,
