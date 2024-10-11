@@ -60,7 +60,7 @@ class DropboxProvider(provider.BaseProvider):
     BASE_URL = pd_settings.BASE_URL
     CONTIGUOUS_UPLOAD_SIZE_LIMIT = pd_settings.CONTIGUOUS_UPLOAD_SIZE_LIMIT
     CHUNK_SIZE = pd_settings.CHUNK_SIZE
-    FORCE_RETRY_ON = {404, 409, 429}
+    FORCE_RETRY_ON = {429}
 
     def __init__(self, auth, credentials, settings, **kwargs):
         super().__init__(auth, credentials, settings, **kwargs)
@@ -370,6 +370,10 @@ class DropboxProvider(provider.BaseProvider):
         :return: session identifier
         """
 
+        # Retry when get response status code in FORCE_RETRY_ON
+        kwargs = {'retry': pd_settings.RETRY,
+                  'force_retry_on': self.FORCE_RETRY_ON,
+                  }
         resp = await self.make_request(
             'POST',
             self._build_content_url('files', 'upload_session', 'start'),
@@ -378,6 +382,7 @@ class DropboxProvider(provider.BaseProvider):
                 'Dropbox-API-Arg': json.dumps({'close': False}),
             },
             expects=(200, ),
+            **kwargs,
             throws=core_exceptions.UploadError
         )
         data = await resp.json()
@@ -463,6 +468,10 @@ class DropboxProvider(provider.BaseProvider):
         if conflict == 'replace':
             upload_args['commit']['mode'] = 'overwrite'
 
+        # Retry when get response status code in FORCE_RETRY_ON
+        kwargs = {'retry': pd_settings.RETRY,
+                  'force_retry_on': self.FORCE_RETRY_ON,
+                  }
         resp = await self.make_request(
             'POST',
             self._build_content_url('files', 'upload_session', 'finish'),
@@ -471,6 +480,7 @@ class DropboxProvider(provider.BaseProvider):
                 'Dropbox-API-Arg': json.dumps(upload_args),
             },
             expects=(200, ),
+            **kwargs,
             throws=core_exceptions.UploadError,
         )
 
@@ -574,7 +584,7 @@ class DropboxProvider(provider.BaseProvider):
             self.build_url('files', 'create_folder_v2'),
             {'path': path.full_path.rstrip('/')},
             throws=core_exceptions.CreateFolderError,
-            force_retry_on={409, 429},
+            force_retry_on={429},
         )
         return DropboxFolderMetadata(data['metadata'], self.folder, self.NAME)
 
