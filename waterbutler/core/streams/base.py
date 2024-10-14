@@ -1,7 +1,11 @@
 import abc
 import asyncio
+import time
+import logging
 
 from waterbutler.server.settings import CHUNK_SIZE
+
+logger = logging.getLogger(__name__)
 
 
 class BaseStream(asyncio.StreamReader, metaclass=abc.ABCMeta):
@@ -160,6 +164,8 @@ class CutoffStream(asyncio.StreamReader):
         self._cutoff = cutoff
         self._thus_far = 0
         self._size = min(cutoff, stream.size)
+        self._start_time = None
+        self._total_time = 0
 
     def __aiter__(self):
         return self
@@ -186,18 +192,28 @@ class CutoffStream(asyncio.StreamReader):
         that many bytes as long as the total number of bytes read so far does not exceed
         ``cutoff``.
         """
+
+        if self._start_time is None:
+            self._start_time = time.time()
+
         if n < 0:
-            return await self.stream.read(self._cutoff)
+            result = await self.stream.read(self._cutoff)
+        else:
+            n = min(n, self._cutoff - self._thus_far)
 
-        n = min(n, self._cutoff - self._thus_far)
+            chunk = b''
+            while self.stream and (len(chunk) < n):
+                subchunk = await self.stream.read(n - len(chunk))
+                chunk += subchunk
+                self._thus_far += len(subchunk)
+            result = chunk
 
-        chunk = b''
-        while self.stream and (len(chunk) < n):
-            subchunk = await self.stream.read(n - len(chunk))
-            chunk += subchunk
-            self._thus_far += len(subchunk)
+        if self._thus_far >= self._cutoff or result == b'':
+            end_time = time.time()
+            self._total_time = end_time - self._start_time
+            logger.info(f"Total processing time read(): {self._total_time}")
 
-        return chunk
+        return result
 
 
 class StringStream(BaseStream):
