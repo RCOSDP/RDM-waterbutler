@@ -232,3 +232,11 @@ class WEKODraftFolderMetadata(BaseWEKOMetadata, metadata.BaseFolderMetadata):
         return {'archivable': '/' not in draft_path[:-1],
                 'has_import_xml': False,
                 'content_files': self.content_files}
+
+    @property
+    def created(self):
+        return self.raw.get('created_at')
+
+    @property
+    def modified(self):
+        return self.raw.get('modified_at')

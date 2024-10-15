@@ -359,7 +359,13 @@ class BaseFolderMetadata(BaseMetadata):
         ret = super().serialized()
         if self.children is not None:
             ret['children'] = [c.serialized() for c in self.children]
-        return ret
+
+        return dict(ret, **{
+            'created': self.created,
+            'created_utc': self.created_utc,
+            'modified': self.modified,
+            'modified_utc': self.modified_utc,
+        })
 
     def json_api_serialized(self, resource: str) -> dict:
         """ Return a JSON-API compliant serializable dict, suitable for the WB v1 API.  Sets the
@@ -408,3 +414,29 @@ class BaseFolderMetadata(BaseMetadata):
     def etag(self) -> typing.Union[str, None]:
         """ FIXME: An etag? """
         return None
+
+    @property
+    @abc.abstractmethod
+    def created(self) -> str:
+        """ Date the file was fist created, as reported by the provider, in
+        the format used by the provider. """
+        raise NotImplementedError
+
+    @property
+    def created_utc(self) -> str:
+        """ Date the file was fist created, as reported by the provider,
+        converted to UTC, in format (YYYY-MM-DDTHH:MM:SS+00:00). """
+        return utils.normalize_datetime(self.created)
+
+    @property
+    @abc.abstractmethod
+    def modified(self) -> str:
+        """ Date the file was last modified, as reported by the provider, in
+        the format used by the provider. """
+        raise NotImplementedError
+
+    @property
+    def modified_utc(self) -> str:
+        """ Date the file was last modified, as reported by the provider,
+        converted to UTC, in format (YYYY-MM-DDTHH:MM:SS+00:00). """
+        return utils.normalize_datetime(self.modified)

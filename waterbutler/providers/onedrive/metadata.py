@@ -62,6 +62,14 @@ class OneDriveFolderMetadata(BaseOneDriveMetadata, metadata.BaseFolderMetadata):
             'created_utc': created,
         })
 
+    @property
+    def created(self):
+        return self.raw.get('created_at')
+
+    @property
+    def modified(self):
+        return self.raw.get('modified_at')
+
 
 class OneDriveFileMetadata(BaseOneDriveMetadata, metadata.BaseFileMetadata):
 

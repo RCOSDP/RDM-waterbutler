@@ -121,7 +121,13 @@ class GitLabFileMetadata(BaseGitLabMetadata, metadata.BaseFileMetadata):
 
 
 class GitLabFolderMetadata(BaseGitLabMetadata, metadata.BaseFolderMetadata):
-    pass
+    @property
+    def created(self):
+        return self.raw.get('created_at')
+
+    @property
+    def modified(self):
+        return self.raw.get('modified_at')
 
 
 class GitLabRevision(metadata.BaseFileRevisionMetadata):

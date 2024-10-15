@@ -115,7 +115,7 @@ def file_metadata_object():
 
 @pytest.fixture
 def folder_key_metadata_object():
-    content = OrderedDict(Key='naptime/',
+    content = OrderedDict(Key='naptime/folder/folder1',
                           LastModified='2009-10-12T17:50:30.000Z',
                           ETag='"fba9dede5f27731c9771645a39863328"',
                           Size='0',
@@ -126,7 +126,9 @@ def folder_key_metadata_object():
 
 @pytest.fixture
 def folder_metadata_object():
-    content = OrderedDict(Prefix='photos/')
+    content = OrderedDict(Prefix='photos/',
+                          created_at='2009-10-12T17:50:30.000Z',
+                          updated_at='2009-10-12T17:50:30.000Z')
     return S3CompatFolderMetadata(content)
 
 

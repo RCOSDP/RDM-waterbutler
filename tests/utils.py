@@ -50,6 +50,9 @@ class MockFolderMetadata(metadata.BaseFolderMetadata):
     etag = 'etag'
     path = '/Bar/'
     modified = 'never'
+    modified_utc = '1991-09-25T19:20:30.45+01:00'
+    created = 'never'
+    created_utc = '1991-09-25T19:20:30.45+01:00'
     content_type = 'application/octet-stream'
 
     def __init__(self):

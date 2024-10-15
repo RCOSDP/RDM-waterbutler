@@ -112,7 +112,13 @@ class OsfStorageFileMetadata(BaseOsfStorageItemMetadata, metadata.BaseFileMetada
 
 
 class OsfStorageFolderMetadata(BaseOsfStorageItemMetadata, metadata.BaseFolderMetadata):
-    pass
+    @property
+    def created(self):
+        return self.raw.get('created')
+
+    @property
+    def modified(self):
+        return self.raw.get('modified')
 
 
 class OsfStorageRevisionMetadata(BaseOsfStorageMetadata, metadata.BaseFileRevisionMetadata):

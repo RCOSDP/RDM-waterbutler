@@ -84,6 +84,13 @@ class NextcloudFileMetadata(BaseNextcloudMetadata, metadata.BaseFileMetadata):
 
 
 class NextcloudFolderMetadata(BaseNextcloudMetadata, metadata.BaseFolderMetadata):
+    @property
+    def modified(self):
+        return None
+
+    @property
+    def created(self):
+        return None
 
     @property
     def content_type(self):

@@ -110,6 +110,14 @@ class BaseGitHubFolderMetadata(BaseGitHubMetadata, metadata.BaseFolderMetadata):
     def path(self):
         return self.build_path(self.raw['path'])
 
+    @property
+    def created(self):
+        return self.raw.get('created_at')
+
+    @property
+    def modified(self):
+        return self.raw.get('modified_at')
+
 
 class GitHubFileContentMetadata(BaseGitHubFileMetadata):
     """Github file metadata object built from a content endpoint response."""
