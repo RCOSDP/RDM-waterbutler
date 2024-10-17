@@ -1112,6 +1112,32 @@ class TestCRUD:
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
+    async def test_chunked_upload_create_upload_session_with_full_path(self, provider,
+                                                                        create_session_resp,
+                                                                        mock_time):
+        path = WaterButlerPath('/foobah', prepend=provider.prefix + 'project_folder/')
+        init_url_full_path = provider.bucket.new_key(path.full_path).generate_url(
+            100,
+            'POST',
+            query_parameters={'uploads': ''}
+        )
+        init_url_path = provider.bucket.new_key(path.path).generate_url(
+            100,
+            'POST',
+            query_parameters={'uploads': ''}
+        )
+
+        aiohttpretty.register_uri('POST', init_url_full_path, body=create_session_resp, status=200)
+        aiohttpretty.register_uri('POST', init_url_path, body=create_session_resp, status=200)
+
+        session_id = await provider._create_upload_session(path)
+
+        assert aiohttpretty.has_call(method='POST', uri=init_url_full_path)
+        assert aiohttpretty.has_call(method='POST', uri=init_url_path) is False
+        assert session_id is not None
+
+    @pytest.mark.asyncio
+    @pytest.mark.aiohttpretty
     async def test_chunked_upload_upload_parts(self, provider, file_stream,
                                                upload_parts_headers_list):
         assert file_stream.size == 6
@@ -1201,6 +1227,50 @@ class TestCRUD:
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
+    async def test_chunked_upload_upload_part_with_full_path(self, provider, file_stream,
+                                              upload_parts_headers_list,
+                                              mock_time):
+        assert file_stream.size == 6
+        provider.CHUNK_SIZE = 2
+
+        path = WaterButlerPath('/foobah', prepend=provider.prefix + 'project_folder/')
+        chunk_number = 1
+        upload_id = 'EXAMPLEJZ6e0YupT2h66iePQCc9IEbYbDUy4RTpMeoSMLPRp8Z5o1u'
+        params = {
+            'partNumber': str(chunk_number),
+            'uploadId': upload_id,
+        }
+        headers = {'Content-Length': str(provider.CHUNK_SIZE)}
+        upload_part_url_full_path = provider.bucket.new_key(path.full_path).generate_url(
+            100,
+            'PUT',
+            query_parameters=params,
+            headers=headers
+        )
+        upload_part_url_path = provider.bucket.new_key(path.path).generate_url(
+            100,
+            'PUT',
+            query_parameters=params,
+            headers=headers
+        )
+        # aiohttp resp headers use upper case
+        part_headers = json.loads(upload_parts_headers_list).get('headers_list')[0]
+        part_headers = {k.upper(): v for k, v in part_headers.items()}
+
+        aiohttpretty.register_uri('PUT', upload_part_url_path, status=200, headers=part_headers)
+        aiohttpretty.register_uri('PUT', upload_part_url_full_path, status=200, headers=part_headers)
+
+        part_metadata = await provider._upload_part(file_stream, path, upload_id, chunk_number,
+                                                    provider.CHUNK_SIZE)
+
+        assert aiohttpretty.has_call(method='PUT', uri=upload_part_url_full_path)
+        assert aiohttpretty.has_call(method='PUT', uri=upload_part_url_path) is False
+        assert part_headers == part_metadata
+
+        provider.CHUNK_SIZE = pd_settings.CHUNK_SIZE
+
+    @pytest.mark.asyncio
+    @pytest.mark.aiohttpretty
     async def test_chunked_upload_complete_multipart_upload(self, provider,
                                                             upload_parts_headers_list,
                                                             complete_upload_resp, mock_time):
@@ -1244,6 +1314,65 @@ class TestCRUD:
         await provider._complete_multipart_upload(path, upload_id, headers_list)
 
         assert aiohttpretty.has_call(method='POST', uri=complete_url, params=params)
+
+    @pytest.mark.asyncio
+    @pytest.mark.aiohttpretty
+    async def test_chunked_upload_complete_multipart_upload_with_full_path(self, provider,
+                                                            upload_parts_headers_list,
+                                                            complete_upload_resp, mock_time):
+        path = WaterButlerPath('/foobah', prepend=provider.prefix + 'project_folder/')
+        upload_id = 'EXAMPLEJZ6e0YupT2h66iePQCc9IEbYbDUy4RTpMeoSMLPRp8Z5o1u' \
+                    '8feSRonpvnWsKKG35tI2LB9VDPiCgTy.Gq2VxQLYjrue4Nq.NBdqI-'
+        params = {'uploadId': upload_id}
+        payload = '<?xml version="1.0" encoding="UTF-8"?>'
+        payload += '<CompleteMultipartUpload>'
+        # aiohttp resp headers are upper case
+        headers_list = json.loads(upload_parts_headers_list).get('headers_list')
+        headers_list = [{k.upper(): v for k, v in headers.items()} for headers in headers_list]
+        for i, part in enumerate(headers_list):
+            payload += '<Part>'
+            payload += '<PartNumber>{}</PartNumber>'.format(i+1)  # part number must be >= 1
+            payload += '<ETag>{}</ETag>'.format(xml.sax.saxutils.escape(part['ETAG']))
+            payload += '</Part>'
+        payload += '</CompleteMultipartUpload>'
+        payload = payload.encode('utf-8')
+
+        headers = {
+            'Content-Length': str(len(payload)),
+            'Content-MD5': compute_md5(BytesIO(payload))[1],
+            'Content-Type': 'text/xml',
+        }
+
+        complete_url_full_path = provider.bucket.new_key(path.full_path).generate_url(
+            100,
+            'POST',
+            headers=headers,
+            query_parameters=params
+        )
+        complete_url_path = provider.bucket.new_key(path.path).generate_url(
+            100,
+            'POST',
+            headers=headers,
+            query_parameters=params
+        )
+
+        aiohttpretty.register_uri(
+            'POST',
+            complete_url_full_path,
+            status=200,
+            body=complete_upload_resp
+        )
+        aiohttpretty.register_uri(
+            'POST',
+            complete_url_path,
+            status=200,
+            body=complete_upload_resp
+        )
+
+        await provider._complete_multipart_upload(path, upload_id, headers_list)
+
+        assert aiohttpretty.has_call(method='POST', uri=complete_url_full_path, params=params)
+        assert aiohttpretty.has_call(method='POST', uri=complete_url_path, params=params) is False
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
@@ -1396,6 +1525,46 @@ class TestCRUD:
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
+    async def test_abort_chunked_upload_with_full_path(self, provider, list_parts_resp_empty,
+                                                   mock_time):
+        path = WaterButlerPath('/foobah', prepend=provider.prefix + 'project_folder/')
+        upload_id = 'EXAMPLEJZ6e0YupT2h66iePQCc9IEbYbDUy4RTpMeoSMLPRp8Z5o1u' \
+                    '8feSRonpvnWsKKG35tI2LB9VDPiCgTy.Gq2VxQLYjrue4Nq.NBdqI-'
+        abort_url_full_path = provider.bucket.new_key(path.full_path).generate_url(
+            100,
+            'DELETE',
+            query_parameters={'uploadId': upload_id}
+        )
+        abort_url_path = provider.bucket.new_key(path.path).generate_url(
+            100,
+            'DELETE',
+            query_parameters={'uploadId': upload_id}
+        )
+        list_url_full_path = provider.bucket.new_key(path.full_path).generate_url(
+            100,
+            'GET',
+            query_parameters={'uploadId': upload_id}
+        )
+        list_url_path = provider.bucket.new_key(path.path).generate_url(
+            100,
+            'GET',
+            query_parameters={'uploadId': upload_id}
+        )
+        aiohttpretty.register_uri('DELETE', abort_url_full_path, status=204)
+        aiohttpretty.register_uri('GET', list_url_full_path, body=list_parts_resp_empty, status=200)
+        aiohttpretty.register_uri('DELETE', abort_url_path, status=204)
+        aiohttpretty.register_uri('GET', list_url_path, body=list_parts_resp_empty, status=200)
+
+        aborted = await provider._abort_chunked_upload(path, upload_id)
+
+        assert aiohttpretty.has_call(method='DELETE', uri=abort_url_full_path)
+        assert aiohttpretty.has_call(method='GET', uri=list_url_full_path)
+        assert aiohttpretty.has_call(method='DELETE', uri=abort_url_path) is False
+        assert aiohttpretty.has_call(method='GET', uri=list_url_path) is False
+        assert aborted is True
+
+    @pytest.mark.asyncio
+    @pytest.mark.aiohttpretty
     async def test_list_uploaded_chunks_session_not_found(self,
                                                           provider,
                                                           generic_http_404_resp,
@@ -1457,6 +1626,35 @@ class TestCRUD:
         resp_xml, session_deleted = await provider._list_uploaded_chunks(path, upload_id)
 
         assert aiohttpretty.has_call(method='GET', uri=list_url)
+        assert resp_xml is not None
+        assert session_deleted is False
+
+    @pytest.mark.asyncio
+    @pytest.mark.aiohttpretty
+    async def test_list_uploaded_chunks_with_full_path(self,
+                                                   provider,
+                                                   list_parts_resp_empty,
+                                                   mock_time):
+        path = WaterButlerPath('/foobah', prepend=provider.prefix + 'project_folder/')
+        upload_id = 'EXAMPLEJZ6e0YupT2h66iePQCc9IEbYbDUy4RTpMeoSMLPRp8Z5o1u' \
+                    '8feSRonpvnWsKKG35tI2LB9VDPiCgTy.Gq2VxQLYjrue4Nq.NBdqI-'
+        list_url_full_path = provider.bucket.new_key(path.full_path).generate_url(
+            100,
+            'GET',
+            query_parameters={'uploadId': upload_id}
+        )
+        list_url_path = provider.bucket.new_key(path.path).generate_url(
+            100,
+            'GET',
+            query_parameters={'uploadId': upload_id}
+        )    
+        aiohttpretty.register_uri('GET', list_url_full_path, body=list_parts_resp_empty, status=200)
+        aiohttpretty.register_uri('GET', list_url_path, body=list_parts_resp_empty, status=200)
+
+        resp_xml, session_deleted = await provider._list_uploaded_chunks(path, upload_id)
+
+        assert aiohttpretty.has_call(method='GET', uri=list_url_full_path)
+        assert aiohttpretty.has_call(method='GET', uri=list_url_path) is False
         assert resp_xml is not None
         assert session_deleted is False
 
