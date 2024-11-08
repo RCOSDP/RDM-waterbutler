@@ -45,6 +45,14 @@
             "id": "id:jki_ZJstdSAAAAAAAAAACQ",
             "rev": "45bb27d11",
             "size": 364
+        },
+
+    "too_many_requests_error": {
+            "error_summary": "too_many_requests/",
+            "error": {
+                "reason": {".tag": "too_many_requests"},
+                "retry_after": 15
+                    }
         }
 
 
