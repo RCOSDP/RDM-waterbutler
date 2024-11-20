@@ -15,6 +15,22 @@ def _flatten_indices(indices):
     return r
 
 
+def _is_valid_index(desc):
+    if 'name' in desc and 'id' in desc:
+        return True
+    if 'id' in desc and desc['id'] == 'more':
+        return False
+    logger.warning('Unexpected index description: %s', desc)
+    return False
+
+
+def _is_valid_item(desc):
+    if 'metadata' in desc:
+        return True
+    logger.warning('Unexpected item description: %s', desc)
+    return False
+
+
 class Client(object):
     """
     WEKO3 Client
@@ -41,6 +57,8 @@ class Client(object):
         root = await self._get('api/tree?action=browsing')
         indices = []
         for desc in root:
+            if not _is_valid_index(desc):
+                continue
             indices.append(Index(self, desc))
         return indices
 
@@ -125,7 +143,13 @@ class Index(object):
 
     @property
     def children(self):
-        return [Index(self.client, i, parent=self) for i in self.raw['children']]
+        if 'children' not in self.raw:
+            return []
+        return [
+            Index(self.client, i, parent=self)
+            for i in self.raw['children']
+            if _is_valid_index(i)
+        ]
 
     async def get_items(self, page: int = 1, size: int = 1000):
         queries = f'page={page}&size={size}&sort=-createdate'
@@ -133,6 +157,8 @@ class Index(object):
         logger.debug(f'get_items: {root}')
         items = []
         for entry in root['hits']['hits']:
+            if not _is_valid_item(entry):
+                continue
             logger.debug(f'get_item: {entry}')
             items.append(Item(entry))
         return items
