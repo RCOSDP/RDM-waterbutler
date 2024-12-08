@@ -271,7 +271,7 @@ class WEKOProvider(provider.BaseProvider):
             )
         logger.debug(f'Target folder: {parent_folder_metadata.path}')
         draft_path = await default_provider.validate_path(
-            parent_folder_metadata.path + last_part.value
+            parent_folder_metadata.path + last_part.value + '/'
         )
         metadata = await default_provider.create_folder(
             draft_path, **kwargs

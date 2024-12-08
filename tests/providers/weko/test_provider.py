@@ -1211,7 +1211,7 @@ class TestCreateFolder:
                 return metadata_weko_folder
             if str(path) == '/0123456789abcdefg000/100/':
                 return metadata_index_folder
-            if str(path) == '/0123456789abcdefg001/test_folder':
+            if str(path) == '/0123456789abcdefg001/test_folder/':
                 return metadata_draft_folder
             assert False
         mock_default_storage_create_folder = MockCoroutine(side_effect=resolve_create_folder)
@@ -1230,7 +1230,7 @@ class TestCreateFolder:
         assert mock_default_storage_create_folder.call_count == 3
         assert str(mock_default_storage_create_folder.call_args_list[0][0][0]) == '/.weko/'
         assert str(mock_default_storage_create_folder.call_args_list[1][0][0]) == '/0123456789abcdefg000/100/'
-        assert str(mock_default_storage_create_folder.call_args_list[2][0][0]) == '/0123456789abcdefg001/test_folder'
+        assert str(mock_default_storage_create_folder.call_args_list[2][0][0]) == '/0123456789abcdefg001/test_folder/'
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
@@ -1266,7 +1266,7 @@ class TestCreateFolder:
 
         def resolve_create_folder(path):
             logger.info(f'create_folder: {path}')
-            if str(path) == '/0123456789abcdefg003/sub_folder':
+            if str(path) == '/0123456789abcdefg003/sub_folder/':
                 return metadata_draft_folder
             assert False
         mock_default_storage_create_folder = MockCoroutine(side_effect=resolve_create_folder)
@@ -1283,7 +1283,7 @@ class TestCreateFolder:
         expected = WEKODraftFolderMetadata(index.identifier, metadata_draft_folder, metadata_index_folder, index)
         assert result == expected
         assert mock_default_storage_create_folder.call_count == 1
-        assert str(mock_default_storage_create_folder.call_args_list[0][0][0]) == '/0123456789abcdefg003/sub_folder'
+        assert str(mock_default_storage_create_folder.call_args_list[0][0][0]) == '/0123456789abcdefg003/sub_folder/'
 
 class TestDownload:
 
