@@ -28,6 +28,8 @@ from waterbutler.providers.weko.metadata import (
     WEKOIndexMetadata, WEKOItemMetadata,  WEKOFileMetadata,
     WEKODraftFileMetadata, WEKODraftFolderMetadata,
 )
+from waterbutler.providers.s3compatb3 import provider as s3compatb3_provider
+from waterbutler.providers.s3compatb3.provider import S3CompatB3Provider
 
 
 logger = logging.getLogger(__name__)
@@ -151,6 +153,7 @@ def settings():
         'index_id': '100',
         'index_title': 'sample archive',
         'nid': 'project_id',
+        'default_storage_provider': 'osfstorage',
         'default_storage': {
             'nid': 'project_id',
             'justa': 'setting',
@@ -617,6 +620,129 @@ class TestMetadata:
         assert item_metadata.provider == 'weko'
         assert item_metadata.path == '/test_folder/sub_file.txt'
         assert item_metadata.materialized_path == '/test_folder/sub_file.txt'
+
+    @pytest.mark.asyncio
+    @pytest.mark.aiohttpretty
+    async def test_metadata_from_default_storage(self, auth, credentials, monkeypatch, file_metadata):
+        custom_settings = {
+            'url': fake_weko_host,
+            'index_id': '100',
+            'index_title': 'sample archive',
+            'nid': 'project_id',
+            'default_storage': {
+                'nid': 'project_id',
+                'justa': 'setting',
+                'rootId': 'rootId',
+                'baseUrl': 'https://waterbutler.io',
+                'storage': {
+                    'provider': 'mock',
+                },
+            },
+        }
+        provider = WEKOProvider(auth, credentials, custom_settings)
+        aiohttpretty.register_json_uri(
+            'GET',
+            'https://test.sample.nii.ac.jp/api/tree?action=browsing',
+            body=fake_weko_indices,
+        )
+        aiohttpretty.register_json_uri(
+            'GET',
+            'https://test.sample.nii.ac.jp/api/index/?page=1&size=1000&sort=-createdate&q=100',
+            body=fake_weko_items,
+        )
+        metadata_weko_folder = file_metadata['weko_folder']
+        metadata_index_folder = file_metadata['index_folder']
+        metadata_draft_file = file_metadata['draft_file']
+        def resolve_metadata(path):
+            if str(path) == '/':
+                return [metadata_weko_folder]
+            if str(path) == '/0123456789abcdefg000/':
+                return [metadata_index_folder]
+            if str(path) == '/0123456789abcdefg001/':
+                return [metadata_draft_file]
+            assert False
+        mock_default_storage_metadata = MockCoroutine(side_effect=resolve_metadata)
+        monkeypatch.setattr(OSFStorageProvider, 'metadata', mock_default_storage_metadata)
+
+        mock_default_storage_validate_path = MockCoroutine(side_effect=lambda path: WaterButlerPath(path))
+        monkeypatch.setattr(OSFStorageProvider, 'validate_path', mock_default_storage_validate_path)
+
+        path = await provider.validate_path('/birdie.jpg')
+        assert path.is_draft_file
+
+        item_metadata = await provider.metadata(path)
+        assert item_metadata.name == 'birdie.jpg'
+        assert item_metadata.extra['weko'] == 'draft'
+        assert item_metadata.extra['index'] == '100'
+        assert item_metadata.provider == 'weko'
+        assert item_metadata.path == '/birdie.jpg'
+        assert item_metadata.materialized_path == '/birdie.jpg'
+
+    @pytest.mark.asyncio
+    @pytest.mark.aiohttpretty
+    async def test_metadata_from_institutional_storage(self, auth, monkeypatch, file_metadata):
+        institutional_storage_credentials = {
+            'token': 'open inside',
+            'user_id': 'requester',
+            'default_storage': {
+                'access_key': 'Dont dead',
+                'secret_key': 'open inside',
+                'host': 'https://waterbutler.io',
+            }
+        }
+        institutional_storage_settings = {
+            'url': fake_weko_host,
+            'index_id': '100',
+            'index_title': 'sample archive',
+            'nid': 'project_id',
+            'default_storage_provider': 'ociinstitutions',
+            'default_storage': {
+                'nid': 'project_id',
+                'justa': 'setting',
+                'rootId': 'rootId',
+                'baseUrl': 'https://waterbutler.io',
+                'bucket': 'TEST',
+            },
+        }
+        monkeypatch.setattr(s3compatb3_provider, 'S3CompatB3Connection', mock.MagicMock())
+        provider = WEKOProvider(auth, institutional_storage_credentials, institutional_storage_settings)
+        aiohttpretty.register_json_uri(
+            'GET',
+            'https://test.sample.nii.ac.jp/api/tree?action=browsing',
+            body=fake_weko_indices,
+        )
+        aiohttpretty.register_json_uri(
+            'GET',
+            'https://test.sample.nii.ac.jp/api/index/?page=1&size=1000&sort=-createdate&q=100',
+            body=fake_weko_items,
+        )
+        metadata_weko_folder = file_metadata['weko_folder']
+        metadata_index_folder = file_metadata['index_folder']
+        metadata_draft_file = file_metadata['draft_file']
+        def resolve_metadata(path):
+            if str(path) == '/':
+                return [metadata_weko_folder]
+            if str(path) == '/0123456789abcdefg000/':
+                return [metadata_index_folder]
+            if str(path) == '/0123456789abcdefg001/':
+                return [metadata_draft_file]
+            assert False
+        mock_default_storage_metadata = MockCoroutine(side_effect=resolve_metadata)
+        monkeypatch.setattr(S3CompatB3Provider, 'metadata', mock_default_storage_metadata)
+
+        mock_default_storage_validate_path = MockCoroutine(side_effect=lambda path: WaterButlerPath(path))
+        monkeypatch.setattr(S3CompatB3Provider, 'validate_path', mock_default_storage_validate_path)
+
+        path = await provider.validate_path('/birdie.jpg')
+        assert path.is_draft_file
+
+        item_metadata = await provider.metadata(path)
+        assert item_metadata.name == 'birdie.jpg'
+        assert item_metadata.extra['weko'] == 'draft'
+        assert item_metadata.extra['index'] == '100'
+        assert item_metadata.provider == 'weko'
+        assert item_metadata.path == '/birdie.jpg'
+        assert item_metadata.materialized_path == '/birdie.jpg'
 
 
 class TestPathFromMetadata:
@@ -1085,7 +1211,7 @@ class TestCreateFolder:
                 return metadata_weko_folder
             if str(path) == '/0123456789abcdefg000/100/':
                 return metadata_index_folder
-            if str(path) == '/0123456789abcdefg001/test_folder':
+            if str(path) == '/0123456789abcdefg001/test_folder/':
                 return metadata_draft_folder
             assert False
         mock_default_storage_create_folder = MockCoroutine(side_effect=resolve_create_folder)
@@ -1104,7 +1230,7 @@ class TestCreateFolder:
         assert mock_default_storage_create_folder.call_count == 3
         assert str(mock_default_storage_create_folder.call_args_list[0][0][0]) == '/.weko/'
         assert str(mock_default_storage_create_folder.call_args_list[1][0][0]) == '/0123456789abcdefg000/100/'
-        assert str(mock_default_storage_create_folder.call_args_list[2][0][0]) == '/0123456789abcdefg001/test_folder'
+        assert str(mock_default_storage_create_folder.call_args_list[2][0][0]) == '/0123456789abcdefg001/test_folder/'
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
@@ -1140,7 +1266,7 @@ class TestCreateFolder:
 
         def resolve_create_folder(path):
             logger.info(f'create_folder: {path}')
-            if str(path) == '/0123456789abcdefg003/sub_folder':
+            if str(path) == '/0123456789abcdefg003/sub_folder/':
                 return metadata_draft_folder
             assert False
         mock_default_storage_create_folder = MockCoroutine(side_effect=resolve_create_folder)
@@ -1157,7 +1283,7 @@ class TestCreateFolder:
         expected = WEKODraftFolderMetadata(index.identifier, metadata_draft_folder, metadata_index_folder, index)
         assert result == expected
         assert mock_default_storage_create_folder.call_count == 1
-        assert str(mock_default_storage_create_folder.call_args_list[0][0][0]) == '/0123456789abcdefg003/sub_folder'
+        assert str(mock_default_storage_create_folder.call_args_list[0][0][0]) == '/0123456789abcdefg003/sub_folder/'
 
 class TestDownload:
 
