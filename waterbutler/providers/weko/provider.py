@@ -141,6 +141,7 @@ class WEKOProvider(provider.BaseProvider):
         self.user_id = self.credentials['user_id']
         self.index_id = self.settings['index_id']
         self.index_title = self.settings['index_title']
+        self.default_storage_provider = self.settings.get('default_storage_provider', 'osfstorage')
         self.default_storage_credentials = credentials.get('default_storage', None)
         self.default_storage_settings = settings.get('default_storage', None)
         self.client = Client(
@@ -151,8 +152,9 @@ class WEKOProvider(provider.BaseProvider):
 
     def make_default_provider(self):
         if not getattr(self, '_default_provider', None):
+            logger.debug(f'Using as default provider: {self.default_storage_provider}')
             self._default_provider = utils.make_provider(
-                'osfstorage',
+                self.default_storage_provider,
                 self.auth,
                 self.default_storage_credentials,
                 self.default_storage_settings,
@@ -269,7 +271,7 @@ class WEKOProvider(provider.BaseProvider):
             )
         logger.debug(f'Target folder: {parent_folder_metadata.path}')
         draft_path = await default_provider.validate_path(
-            parent_folder_metadata.path + last_part.value
+            parent_folder_metadata.path + last_part.value + '/'
         )
         metadata = await default_provider.create_folder(
             draft_path, **kwargs
