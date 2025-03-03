@@ -496,13 +496,34 @@ class S3Provider(provider.BaseProvider):
                 )
 
         if path.is_file:
-            resp = await self.make_request(
-                'DELETE',
-                self.bucket.new_key(path.path).generate_url(settings.TEMP_URL_SECS, 'DELETE'),
-                expects=(200, 204, ),
-                throws=exceptions.DeleteError,
-            )
-            await resp.release()
+            # Check and delete all versions of the file
+            try:
+                versions = await self.revisions(path)
+                # Delete each version of the file
+                for version in versions:
+                    resp = await self.make_request(
+                        'DELETE',
+                        self.bucket.new_key(path.full_path).generate_url(
+                            settings.TEMP_URL_SECS,
+                            'DELETE',
+                            query_parameters={'versionId': version.raw['VersionId']}
+                        ),
+                        expects=(200, 204,),
+                        throws=exceptions.DeleteError,
+                    )
+                    await resp.release()
+
+            except exceptions.MetadataError:
+                # Skip if versions cannot be retrieved
+                # or if the file has no versions
+                # In this case, delete the current version directly
+                resp = await self.make_request(
+                    'DELETE',
+                    self.bucket.new_key(path.full_path).generate_url(settings.TEMP_URL_SECS, 'DELETE'),
+                    expects=(200, 204,),
+                    throws=exceptions.DeleteError,
+                )
+                await resp.release()
         else:
             await self._delete_folder(path, **kwargs)
 
@@ -524,80 +545,84 @@ class S3Provider(provider.BaseProvider):
         objects.  Amazon provides a bulk delete operation to simplify this.
         """
         await self._check_region()
-
         more_to_come = True
         content_keys = []
-        query_params = {'prefix': path.path}
-        marker = None
+        query_params = {'prefix': path.path, 'versions': ''}
+        key_marker = None
+        version_marker = None
 
         while more_to_come:
-            if marker is not None:
-                query_params['marker'] = marker
+            if key_marker is not None:
+                query_params['key-marker'] = key_marker
+            if version_marker is not None:
+                query_params['version-id-marker'] = version_marker
 
             resp = await self.make_request(
                 'GET',
-                self.bucket.generate_url(settings.TEMP_URL_SECS, 'GET', query_parameters=query_params),
+                functools.partial(self.bucket.generate_url, settings.TEMP_URL_SECS, 'GET', query_parameters=query_params),
                 params=query_params,
                 expects=(200, ),
                 throws=exceptions.MetadataError,
             )
 
             contents = await resp.read()
-            parsed = xmltodict.parse(contents, strip_whitespace=False)['ListBucketResult']
+            parsed = xmltodict.parse(contents, strip_whitespace=False)['ListVersionsResult']
             more_to_come = parsed.get('IsTruncated') == 'true'
-            contents = parsed.get('Contents', [])
 
-            if isinstance(contents, dict):
-                contents = [contents]
+            # Get both current versions and delete markers
+            versions = parsed.get('Version', [])
+            delete_markers = parsed.get('DeleteMarker', [])
 
-            content_keys.extend([content['Key'] for content in contents])
-            if len(content_keys) > 0:
-                marker = content_keys[-1]
+            if isinstance(versions, dict):
+                versions = [versions]
+            if isinstance(delete_markers, dict):
+                delete_markers = [delete_markers]
 
-        # Query against non-existant folder does not return 404
+            # Process versions and delete markers
+            for version in versions + delete_markers:
+                content_keys.append({
+                    'key': version['Key'],
+                    'version_id': version.get('VersionId')
+                })
+
+            if more_to_come:
+                key_marker = parsed.get('NextKeyMarker')
+                version_marker = parsed.get('NextVersionIdMarker')
+                if not key_marker and not version_marker:
+                    more_to_come = False
+
+        # Query against non-existent folder does not return 404
         if len(content_keys) == 0:
             raise exceptions.NotFoundError(str(path))
 
-        while len(content_keys) > 0:
-            key_batch = content_keys[:1000]
-            del content_keys[:1000]
-
-            payload = '<?xml version="1.0" encoding="UTF-8"?>'
-            payload += '<Delete>'
-            payload += ''.join(map(
-                lambda x: '<Object><Key>{}</Key></Object>'.format(xml.sax.saxutils.escape(x)),
-                key_batch
-            ))
-            payload += '</Delete>'
-            payload = payload.encode('utf-8')
-            md5 = compute_md5(BytesIO(payload))
-
-            query_params = {'delete': ''}
-            headers = {
-                'Content-Length': str(len(payload)),
-                'Content-MD5': md5[1],
-                'Content-Type': 'text/xml',
-            }
-
-            # We depend on a customized version of boto that can make query parameters part of
-            # the signature.
-            url = functools.partial(
-                self.bucket.generate_url,
-                settings.TEMP_URL_SECS,
-                'POST',
-                query_parameters=query_params,
-                headers=headers,
-            )
-            resp = await self.make_request(
-                'POST',
-                url,
-                params=query_params,
-                data=payload,
-                headers=headers,
-                expects=(200, 204, ),
-                throws=exceptions.DeleteError,
-            )
-            await resp.release()
+        # Delete all versions of each object
+        for content in content_keys[::-1]:
+            try:
+                if content['version_id'] is not None:
+                    # Delete specific version
+                    resp = await self.make_request(
+                        'DELETE',
+                        self.bucket.new_key(content['key']).generate_url(
+                            settings.TEMP_URL_SECS,
+                            'DELETE',
+                            query_parameters={'versionId': content['version_id']}
+                        ),
+                        expects=(200, 204, ),
+                        throws=exceptions.DeleteError,
+                    )
+                else:
+                    # Delete current version if version_id is not specified
+                    resp = await self.make_request(
+                        'DELETE',
+                        self.bucket.new_key(content['key']).generate_url(settings.TEMP_URL_SECS, 'DELETE'),
+                        expects=(200, 204, ),
+                        throws=exceptions.DeleteError,
+                    )
+                await resp.release()
+            except exceptions.DeleteError as e:
+                logger.warning('Failed to delete object: key={}, version_id={}, error={}'.format(
+                    content['key'], content['version_id'], str(e)))
+                raise
 
     async def revisions(self, path, **kwargs):
         """Get past versions of the requested key

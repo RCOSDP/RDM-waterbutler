@@ -10,7 +10,6 @@ import xmltodict
 
 from boto.compat import BytesIO  # type: ignore
 from boto.s3.connection import S3Connection, OrdinaryCallingFormat, NoHostProvided
-from boto.connection import HTTPRequest
 from boto.s3.bucket import Bucket
 from boto.utils import compute_md5
 
@@ -46,14 +45,6 @@ class S3CompatConnection(S3Connection):
                 path=path, provider=provider, bucket_class=bucket_class,
                 security_token=security_token, anon=anon,
                 validate_certs=validate_certs, profile_name=profile_name)
-
-    def add_auth(self, method, url, headers):
-        urlo = parse.urlparse(url)
-        self._auth_handler.add_auth(HTTPRequest(method, urlo.scheme,
-                                                urlo.hostname, self.port,
-                                                urlo.path, urlo.path, {},
-                                                headers, ''))
-        return url[:url.index('?')] if '?' in url else url
 
     def _required_auth_capability(self):
         return ['s3']
@@ -256,11 +247,9 @@ class S3CompatProvider(provider.BaseProvider):
         )
 
         headers = {}
-        raw_url = self.connection.add_auth('GET', url('GET'), headers)
-
         resp = await self.make_request(
             'GET',
-            raw_url,
+            url,
             range=range,
             headers=headers,
             expects=(200, 206),
@@ -599,7 +588,7 @@ class S3CompatProvider(provider.BaseProvider):
         await resp.release()
 
     async def delete(self, path, confirm_delete=0, **kwargs):
-        """Deletes the key at the specified path
+        """Delete the key and all its versions at the specified path
 
         :param path: ( :class:`.WaterButlerPath` ) The path of the key to delete
         :param int confirm_delete: Must be 1 to confirm root folder delete
@@ -612,13 +601,34 @@ class S3CompatProvider(provider.BaseProvider):
                 )
 
         if path.is_file:
-            resp = await self.make_request(
-                'DELETE',
-                self.bucket.new_key(path.full_path).generate_url(settings.TEMP_URL_SECS, 'DELETE'),
-                expects=(200, 204, ),
-                throws=exceptions.DeleteError,
-            )
-            await resp.release()
+            # Check and delete all versions of the file
+            try:
+                versions = await self.revisions(path)
+                # Delete each version of the file
+                for version in versions:
+                    resp = await self.make_request(
+                        'DELETE',
+                        self.bucket.new_key(path.full_path).generate_url(
+                            settings.TEMP_URL_SECS,
+                            'DELETE',
+                            query_parameters={'versionId': version.raw['VersionId']}
+                        ),
+                        expects=(200, 204,),
+                        throws=exceptions.DeleteError,
+                    )
+                    await resp.release()
+
+            except exceptions.MetadataError:
+                # Skip if versions cannot be retrieved
+                # or if the file has no versions
+                # In this case, delete the current version directly
+                resp = await self.make_request(
+                    'DELETE',
+                    self.bucket.new_key(path.full_path).generate_url(settings.TEMP_URL_SECS, 'DELETE'),
+                    expects=(200, 204,),
+                    throws=exceptions.DeleteError,
+                )
+                await resp.release()
         else:
             await self._delete_folder(path, **kwargs)
 
@@ -665,52 +675,84 @@ class S3CompatProvider(provider.BaseProvider):
         """
         if not path.full_path.endswith('/'):
             raise exceptions.InvalidParameters('not a folder: {}'.format(str(path)))
+
         more_to_come = True
         content_keys = []
         prefix = path.full_path.lstrip('/')  # '/' -> '', '/A/B/' -> 'A/B/'
-        query_params = {'prefix': prefix}
+        query_params = {'prefix': prefix, 'versions': ''}
         marker = None
 
         while more_to_come:
             if marker is not None:
                 query_params['marker'] = marker
-
+            url = functools.partial(self.bucket.generate_url, settings.TEMP_URL_SECS, 'GET', query_parameters=query_params)
             resp = await self.make_request(
                 'GET',
-                self.bucket.generate_url(settings.TEMP_URL_SECS, 'GET'),
+                url,
                 params=query_params,
                 expects=(200, ),
                 throws=exceptions.MetadataError,
             )
 
             contents = await resp.read()
-            parsed = xmltodict.parse(contents, strip_whitespace=False)['ListBucketResult']
+            parsed = xmltodict.parse(contents, strip_whitespace=False)['ListVersionsResult']
             more_to_come = parsed.get('IsTruncated') == 'true'
-            contents = parsed.get('Contents', [])
 
-            if isinstance(contents, dict):
-                contents = [contents]
+            # Get both current versions and delete markers
+            versions = parsed.get('Version', [])
+            delete_markers = parsed.get('DeleteMarker', [])
 
-            content_keys.extend([content['Key'] for content in contents])
-            if len(content_keys) > 0:
-                marker = content_keys[-1]
+            if isinstance(versions, dict):
+                versions = [versions]
+            if isinstance(delete_markers, dict):
+                delete_markers = [delete_markers]
 
-        # Query against non-existant folder does not return 404
+            # Process versions and delete markers
+            for version in versions + delete_markers:
+                content_keys.append({
+                    'key': version['Key'],
+                    'version_id': version.get('VersionId')
+                })
+
+            if more_to_come:
+                marker = parsed.get('NextKeyMarker')
+
+        # Query against non-existent folder does not return 404
         if len(content_keys) == 0:
             # MinIO cannot return Contents with a leaf folder itself.
             if await self._folder_prefix_exists(prefix):
-                content_keys = [prefix]
+                content_keys = [{'key': prefix, 'version_id': None}]
             else:
                 raise exceptions.NotFoundError(str(path))
 
-        for content_key in content_keys[::-1]:
-            resp = await self.make_request(
-                'DELETE',
-                self.bucket.new_key(content_key).generate_url(settings.TEMP_URL_SECS, 'DELETE'),
-                expects=(200, 204, ),
-                throws=exceptions.DeleteError,
-            )
-            await resp.release()
+        # Delete all versions of each object
+        for content in content_keys[::-1]:
+            try:
+                if content['version_id'] is not None:
+                    # Delete specific version
+                    resp = await self.make_request(
+                        'DELETE',
+                        self.bucket.new_key(content['key']).generate_url(
+                            settings.TEMP_URL_SECS,
+                            'DELETE',
+                            query_parameters={'versionId': content['version_id']}
+                        ),
+                        expects=(200, 204, ),
+                        throws=exceptions.DeleteError,
+                    )
+                else:
+                    # Delete current version if version_id is not specified
+                    resp = await self.make_request(
+                        'DELETE',
+                        self.bucket.new_key(content['key']).generate_url(settings.TEMP_URL_SECS, 'DELETE'),
+                        expects=(200, 204, ),
+                        throws=exceptions.DeleteError,
+                    )
+                await resp.release()
+            except exceptions.DeleteError as e:
+                logger.warning('Failed to delete object: key={}, version_id={}, error={}'.format(
+                    content['key'], content['version_id'], str(e)))
+                raise
 
     async def revisions(self, path, **kwargs):
         """Get past versions of the requested key
