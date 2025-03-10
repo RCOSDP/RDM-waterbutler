@@ -815,190 +815,247 @@ class TestCRUD:
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
-    async def test_delete(self, provider, mock_time):
-        path = WaterButlerPath('/some-file')
-        url = provider.bucket.new_key(path.path).generate_url(100, 'DELETE')
-        aiohttpretty.register_uri('DELETE', url, status=200)
+    async def test_delete(self, provider, version_metadata, mock_time):
+        path = WaterButlerPath('/my-image.jpg')
+
+        # Mock the versions list response
+        versions_url = provider.bucket.generate_url(100, 'GET', query_parameters={'versions': ''})
+        params = {'prefix': path.path, 'delimiter': '/'}
+        aiohttpretty.register_uri('GET', versions_url, params=params, status=200, body=version_metadata)
+
+        # Mock delete calls for each version ID from version_metadata
+        version_ids = [
+            '3/L4kqtJl40Nr8X8gdRQBpUMLUo',
+            'QUpfdndhfd8438MNFDN93jdnJFkdmqnh893',
+            'UIORUnfndfhnw89493jJFJ'
+        ]
+
+        for version_id in version_ids:
+            delete_url = provider.bucket.new_key(path.path).generate_url(
+                100,
+                'DELETE',
+                query_parameters={'versionId': version_id}
+            )
+            aiohttpretty.register_uri('DELETE', delete_url, status=204)
 
         await provider.delete(path)
 
-        assert aiohttpretty.has_call(method='DELETE', uri=url)
+        # Verify delete calls were made for each version
+        delete_calls = [call for call in aiohttpretty.calls if call['method'] == 'DELETE']
+        assert len(delete_calls) == 3
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
-    async def test_delete_comfirm_delete(self, provider, folder_and_contents, mock_time):
+    async def test_delete_confirm_delete(self, provider, version_metadata, mock_time):
         path = WaterButlerPath('/')
 
-        query_url = provider.bucket.generate_url(100, 'GET')
+        # Mock request GET versions
+        versions_url = provider.bucket.generate_url(100, 'GET', query_parameters={'versions': ''})
+        params = {'prefix': '', 'versions': ''}
         aiohttpretty.register_uri(
             'GET',
-            query_url,
-            params={'prefix': ''},
-            body=folder_and_contents,
-            status=200,
+            versions_url,
+            params=params,
+            body=version_metadata,
+            status=200
         )
 
-        (payload, headers) = bulk_delete_body(
-            ['thisfolder/', 'thisfolder/item1', 'thisfolder/item2']
-        )
-        delete_url = provider.bucket.generate_url(
-            100,
-            'POST',
-            query_parameters={'delete': ''},
-            headers=headers,
-        )
-        aiohttpretty.register_uri('POST', delete_url, status=204)
+        # Mock delete calls for each version ID from version_metadata
+        versions = [
+            {
+                'id': '3/L4kqtJl40Nr8X8gdRQBpUMLUo',
+                'path': WaterButlerPath('/my-image.jpg')
+            },
+            {
+                'id': 'QUpfdndhfd8438MNFDN93jdnJFkdmqnh893',
+                'path': WaterButlerPath('/my-image.jpg')
+            },
+            {
+                'id': 'UIORUnfndfhnw89493jJFJ',
+                'path': WaterButlerPath('/my-image.jpg')
+            }
+        ]
+
+        for version in versions:
+            delete_url = provider.bucket.new_key(version['path']).generate_url(
+                100,
+                'DELETE',
+                query_parameters={'versionId': version['id']}
+            )
+            aiohttpretty.register_uri('DELETE', delete_url, status=204)
 
         with pytest.raises(exceptions.DeleteError):
             await provider.delete(path)
 
         await provider.delete(path, confirm_delete=1)
 
-        assert aiohttpretty.has_call(method='POST', uri=delete_url)
+        delete_calls = [call for call in aiohttpretty.calls if call['method'] == 'DELETE']
+        assert len(delete_calls) == 3
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
-    async def test_folder_delete(self, provider, folder_and_contents, mock_time):
-        path = WaterButlerPath('/some-folder/')
+    async def test_delete_folder_with_versions(self, provider, mock_time):
+        path = WaterButlerPath('/folder-to-delete/')
 
-        params = {'prefix': 'some-folder/'}
-        query_url = provider.bucket.generate_url(100, 'GET')
-        aiohttpretty.register_uri(
-            'GET',
-            query_url,
-            params=params,
-            body=folder_and_contents,
-            status=200,
-        )
+        # Mock list versions response
+        versions_url = provider.bucket.generate_url(100, 'GET', query_parameters={'versions': ''})
+        params = {'prefix': path.path, 'versions': ''}
 
-        query_params = {'delete': ''}
-        (payload, headers) = bulk_delete_body(
-            ['thisfolder/', 'thisfolder/item1', 'thisfolder/item2']
-        )
+        list_versions_body = '''<?xml version="1.0" encoding="UTF-8"?>
+            <ListVersionsResult>
+                <Version>
+                    <Key>folder-to-delete/file1.txt</Key>
+                    <VersionId>111</VersionId>
+                </Version>
+                <Version>
+                    <Key>folder-to-delete/file1.txt</Key>
+                    <VersionId>222</VersionId>
+                </Version>
+                <DeleteMarker>
+                    <Key>folder-to-delete/file2.txt</Key>
+                    <VersionId>333</VersionId>
+                </DeleteMarker>
+            </ListVersionsResult>'''
 
-        delete_url = provider.bucket.generate_url(
-            100,
-            'POST',
-            query_parameters=query_params,
-            headers=headers,
-        )
-        aiohttpretty.register_uri('POST', delete_url, status=204)
+        aiohttpretty.register_uri('GET', versions_url, params=params, body=list_versions_body, status=200)
 
-        await provider.delete(path)
+        # Mock delete requests for each version
+        for version_id in ['111', '222', '333']:
+            for file_path in ['folder-to-delete/file1.txt', 'folder-to-delete/file2.txt']:
+                delete_url = provider.bucket.new_key(file_path).generate_url(
+                    100,
+                    'DELETE',
+                    query_parameters={'versionId': version_id}
+                )
+                aiohttpretty.register_uri('DELETE', delete_url, status=204)
 
-        assert aiohttpretty.has_call(method='GET', uri=query_url, params=params)
-        assert aiohttpretty.has_call(method='POST', uri=delete_url)
+        await provider._delete_folder(path)
 
-    @pytest.mark.asyncio
-    @pytest.mark.aiohttpretty
-    async def test_single_item_folder_delete(self,
-                                             provider,
-                                             folder_single_item_metadata,
-                                             mock_time):
-        path = WaterButlerPath('/single-thing-folder/')
+        # Verify list versions request was made
+        assert aiohttpretty.has_call(method='GET', uri=versions_url, params=params)
 
-        params = {'prefix': 'single-thing-folder/'}
-        query_url = provider.bucket.generate_url(100, 'GET')
-        aiohttpretty.register_uri(
-            'GET',
-            query_url,
-            params=params,
-            body=folder_single_item_metadata,
-            status=200,
-        )
-
-        (payload, headers) = bulk_delete_body(
-            ['my-image.jpg']
-        )
-        delete_url = provider.bucket.generate_url(
-            100,
-            'POST',
-            query_parameters={'delete': ''},
-            headers=headers,
-        )
-        aiohttpretty.register_uri('POST', delete_url, status=204)
-
-
-        await provider.delete(path)
-        assert aiohttpretty.has_call(method='GET', uri=query_url, params=params)
-        aiohttpretty.register_uri('POST', delete_url, status=204)
+        # Verify delete calls were made for each version
+        delete_calls = [call for call in aiohttpretty.calls if call['method'] == 'DELETE']
+        assert len(delete_calls) == 3
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
-    async def test_empty_folder_delete(self, provider, folder_empty_metadata, mock_time):
-        path = WaterButlerPath('/empty-folder/')
+    async def test_delete_folder_truncated_response(self, provider, mock_time):
+        path = WaterButlerPath('/large-folder/')
 
-        params = {'prefix': 'empty-folder/'}
-        query_url = provider.bucket.generate_url(100, 'GET')
-        aiohttpretty.register_uri(
-            'GET',
-            query_url,
-            params=params,
-            body=folder_empty_metadata,
-            status=200,
-        )
+        # Mock first list versions response (truncated)
+        versions_url = provider.bucket.generate_url(100, 'GET', query_parameters={'versions': ''})
+        params1 = {'prefix': path.path, 'versions': ''}
+
+        list_versions_body1 = '''<?xml version="1.0" encoding="UTF-8"?>
+            <ListVersionsResult>
+                <IsTruncated>true</IsTruncated>
+                <NextKeyMarker>large-folder/file2.txt</NextKeyMarker>
+                <NextVersionIdMarker>222</NextVersionIdMarker>
+                <Version>
+                    <Key>large-folder/file1.txt</Key>
+                    <VersionId>111</VersionId>
+                </Version>
+            </ListVersionsResult>'''
+
+        aiohttpretty.register_uri('GET', versions_url, params=params1, body=list_versions_body1, status=200)
+
+        # Mock second list versions response
+        params2 = {
+            'prefix': path.path,
+            'versions': '',
+            'key-marker': 'large-folder/file2.txt',
+            'version-id-marker': '222'
+        }
+
+        list_versions_body2 = '''<?xml version="1.0" encoding="UTF-8"?>
+            <ListVersionsResult>
+                <IsTruncated>false</IsTruncated>
+                <Version>
+                    <Key>large-folder/file2.txt</Key>
+                    <VersionId>222</VersionId>
+                </Version>
+            </ListVersionsResult>'''
+
+        aiohttpretty.register_uri('GET', versions_url, params=params2, body=list_versions_body2, status=200)
+
+        # Mock delete requests
+        for version_id, file_path in [
+            ('111', 'large-folder/file1.txt'),
+            ('222', 'large-folder/file2.txt')
+        ]:
+            delete_url = provider.bucket.new_key(file_path).generate_url(
+                100,
+                'DELETE',
+                query_parameters={'versionId': version_id}
+            )
+            aiohttpretty.register_uri('DELETE', delete_url, status=204)
+
+        await provider._delete_folder(path)
+
+        # Verify both list versions requests were made
+        assert aiohttpretty.has_call(method='GET', uri=versions_url, params=params1)
+        assert aiohttpretty.has_call(method='GET', uri=versions_url, params=params2)
+
+        # Verify delete calls were made for each version
+        delete_calls = [call for call in aiohttpretty.calls if call['method'] == 'DELETE']
+        assert len(delete_calls) == 2
+
+    @pytest.mark.asyncio
+    @pytest.mark.aiohttpretty
+    async def test_delete_folder_not_found(self, provider, mock_time):
+        path = WaterButlerPath('/not-found-folder/')
+
+        # Mock empty list versions response
+        versions_url = provider.bucket.generate_url(100, 'GET', query_parameters={'versions': ''})
+        params = {'prefix': path.path, 'versions': ''}
+
+        list_versions_body = '''<?xml version="1.0" encoding="UTF-8"?>
+            <ListVersionsResult>
+                <IsTruncated>false</IsTruncated>
+            </ListVersionsResult>'''
+
+        aiohttpretty.register_uri('GET', versions_url, params=params, body=list_versions_body, status=200)
 
         with pytest.raises(exceptions.NotFoundError):
-            await provider.delete(path)
+            await provider._delete_folder(path)
 
-        assert aiohttpretty.has_call(method='GET', uri=query_url, params=params)
+        # Verify list versions request was made
+        assert aiohttpretty.has_call(method='GET', uri=versions_url, params=params)
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
-    async def test_large_folder_delete(self, provider, mock_time):
-        path = WaterButlerPath('/some-folder/')
+    async def test_delete_folder_delete_error(self, provider, mock_time):
+        path = WaterButlerPath('/error-folder/')
 
-        query_url = provider.bucket.generate_url(100, 'GET')
+        # Mock list versions response
+        versions_url = provider.bucket.generate_url(100, 'GET', query_parameters={'versions': ''})
+        params = {'prefix': path.path, 'versions': ''}
 
-        keys_one = [str(x) for x in range(2500, 3500)]
-        response_one = list_objects_response(keys_one, truncated=True)
-        params_one = {'prefix': 'some-folder/'}
+        list_versions_body = '''<?xml version="1.0" encoding="UTF-8"?>
+            <ListVersionsResult>
+                <Version>
+                    <Key>error-folder/file1.txt</Key>
+                    <VersionId>111</VersionId>
+                </Version>
+            </ListVersionsResult>'''
 
-        keys_two = [str(x) for x in range(3500, 3601)]
-        response_two = list_objects_response(keys_two)
-        params_two = {'prefix': 'some-folder/', 'marker': '3499'}
+        aiohttpretty.register_uri('GET', versions_url, params=params, body=list_versions_body, status=200)
 
-        aiohttpretty.register_uri(
-            'GET',
-            query_url,
-            params=params_one,
-            body=response_one,
-            status=200,
-        )
-        aiohttpretty.register_uri(
-            'GET',
-            query_url,
-            params=params_two,
-            body=response_two,
-            status=200,
-        )
-
-        query_params = {'delete': None}
-
-        (payload_one, headers_one) = bulk_delete_body(keys_one)
-        delete_url_one = provider.bucket.generate_url(
+        # Mock failed delete request
+        delete_url = provider.bucket.new_key('error-folder/file1.txt').generate_url(
             100,
-            'POST',
-            query_parameters=query_params,
-            headers=headers_one,
+            'DELETE',
+            query_parameters={'versionId': '111'}
         )
-        aiohttpretty.register_uri('POST', delete_url_one, status=204)
+        aiohttpretty.register_uri('DELETE', delete_url, status=403)
 
-        (payload_two, headers_two) = bulk_delete_body(keys_two)
-        delete_url_two = provider.bucket.generate_url(
-            100,
-            'POST',
-            query_parameters=query_params,
-            headers=headers_two,
-        )
-        aiohttpretty.register_uri('POST', delete_url_two, status=204)
+        with pytest.raises(exceptions.DeleteError):
+            await provider._delete_folder(path)
 
-        await provider.delete(path)
-
-        assert aiohttpretty.has_call(method='GET', uri=query_url, params=params_one)
-        assert aiohttpretty.has_call(method='GET', uri=query_url, params=params_two)
-        assert aiohttpretty.has_call(method='POST', uri=delete_url_one)
-        assert aiohttpretty.has_call(method='POST', uri=delete_url_two)
+        # Verify both requests were made
+        assert aiohttpretty.has_call(method='GET', uri=versions_url, params=params)
+        assert aiohttpretty.has_call(method='DELETE', uri=delete_url)
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty

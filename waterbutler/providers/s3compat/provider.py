@@ -680,15 +680,18 @@ class S3CompatProvider(provider.BaseProvider):
         content_keys = []
         prefix = path.full_path.lstrip('/')  # '/' -> '', '/A/B/' -> 'A/B/'
         query_params = {'prefix': prefix, 'versions': ''}
-        marker = None
+        key_marker = None
+        version_marker = None
 
         while more_to_come:
-            if marker is not None:
-                query_params['marker'] = marker
-            url = functools.partial(self.bucket.generate_url, settings.TEMP_URL_SECS, 'GET', query_parameters=query_params)
+            if key_marker is not None:
+                query_params['key-marker'] = key_marker
+            if version_marker is not None:
+                query_params['version-id-marker'] = version_marker
+
             resp = await self.make_request(
                 'GET',
-                url,
+                functools.partial(self.bucket.generate_url, settings.TEMP_URL_SECS, 'GET', query_parameters=query_params),
                 params=query_params,
                 expects=(200, ),
                 throws=exceptions.MetadataError,
@@ -715,7 +718,10 @@ class S3CompatProvider(provider.BaseProvider):
                 })
 
             if more_to_come:
-                marker = parsed.get('NextKeyMarker')
+                key_marker = parsed.get('NextKeyMarker')
+                version_marker = parsed.get('NextVersionIdMarker')
+                if not key_marker and not version_marker:
+                    more_to_come = False
 
         # Query against non-existent folder does not return 404
         if len(content_keys) == 0:
