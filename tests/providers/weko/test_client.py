@@ -37,7 +37,62 @@ fake_weko_items = {
             fake_weko_item,
             {
                 'id': 'dummy',
-            }
+            },
+            {
+                'id': 'empty-metadata-1',
+                'metadata': {},
+            },
+            {
+                'id': 'empty-metadata-2',
+                'metadata': {
+                    '_item_metadata': {},
+                },
+            },
+            {
+                'id': 'invalid-metadata-1',
+                'metadata': {
+                    '_item_metadata': {
+                        'title': [],
+                    },
+                },
+            },
+            {
+                'id': 'invalid-metadata-2',
+                'metadata': {
+                    '_item_metadata': {},
+                    'title': [],
+                },
+            },
+            {
+                'id': 'title-on-root-str',
+                'metadata': {
+                    '_item_metadata': {},
+                    'title': 'Sample Item-Text',
+                },
+            },
+            {
+                'id': 'title-on-root-list',
+                'metadata': {
+                    '_item_metadata': {},
+                    'title': ['Sample Item-List'],
+                },
+            },
+            {
+                'id': 'title-on-_item-metadata-str',
+                'metadata': {
+                    '_item_metadata': {
+                        'title': 'Sample Item-Text',
+                    },
+                },
+            },
+            {
+                'id': 'title-on-_item-metadata-list',
+                'metadata': {
+                    '_item_metadata': {
+                        'title': ['Sample Item-List'],
+                    },
+                },
+            },
         ]
     },
 }
@@ -135,9 +190,22 @@ class TestWEKOClient:
         index = await client.get_index_by_id(100)
         items = await index.get_items()
 
-        assert len(items) == 1
+        assert len(items) == 5
         assert items[0].title == 'Sample Item'
+        assert items[0].primary_title == 'Sample Item'
         assert items[0].identifier == 1000
+        assert items[1].title == 'Sample Item-Text'
+        assert items[1].primary_title == 'Sample Item-Text'
+        assert items[1].identifier == 'title-on-root-str'
+        assert items[2].title == 'Sample Item-List'
+        assert items[2].primary_title == 'Sample Item-List'
+        assert items[2].identifier == 'title-on-root-list'
+        assert items[3].title == 'Sample Item-Text'
+        assert items[3].primary_title == 'Sample Item-Text'
+        assert items[3].identifier == 'title-on-_item-metadata-str'
+        assert items[4].title == 'Sample Item-List'
+        assert items[4].primary_title == 'Sample Item-List'
+        assert items[4].identifier == 'title-on-_item-metadata-list'
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
