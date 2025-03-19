@@ -27,6 +27,25 @@ from waterbutler.providers.s3compat.metadata import (S3CompatRevision,
 logger = logging.getLogger(__name__)
 
 
+def prepare_xml_body(object_dict):
+    """
+    Prepare xml body for call delete api
+    :param object_dict: The dictionary of key and version_id
+    :return: The xml body base on content of object_dict
+    """
+    payload = '<?xml version="1.0" encoding="UTF-8"?>'
+    payload += '<Delete>'
+    payload += ''.join(
+        '<Object><Key>{}</Key><VersionId>{}</VersionId></Object>'.format(xml.sax.saxutils.escape(key),
+                                                                         xml.sax.saxutils.escape(version))
+        for key, value in object_dict.items()
+        for version in value
+    )
+    payload += '</Delete>'
+    payload = payload.encode('utf-8')
+    return payload
+
+
 class S3CompatConnection(S3Connection):
     def __init__(self, aws_access_key_id=None, aws_secret_access_key=None,
                  is_secure=True, port=None, proxy=None, proxy_port=None,
@@ -37,14 +56,14 @@ class S3CompatConnection(S3Connection):
                  suppress_consec_slashes=True, anon=False,
                  validate_certs=None, profile_name=None):
         super(S3CompatConnection, self).__init__(aws_access_key_id,
-                aws_secret_access_key,
-                is_secure, port, proxy, proxy_port, proxy_user, proxy_pass,
-                host=host,
-                debug=debug, https_connection_factory=https_connection_factory,
-                calling_format=calling_format,
-                path=path, provider=provider, bucket_class=bucket_class,
-                security_token=security_token, anon=anon,
-                validate_certs=validate_certs, profile_name=profile_name)
+                                                 aws_secret_access_key,
+                                                 is_secure, port, proxy, proxy_port, proxy_user, proxy_pass,
+                                                 host=host,
+                                                 debug=debug, https_connection_factory=https_connection_factory,
+                                                 calling_format=calling_format,
+                                                 path=path, provider=provider, bucket_class=bucket_class,
+                                                 security_token=security_token, anon=anon,
+                                                 validate_certs=validate_certs, profile_name=profile_name)
 
     def _required_auth_capability(self):
         return ['s3']
@@ -112,14 +131,14 @@ class S3CompatProvider(provider.BaseProvider):
                 'GET',
                 functools.partial(self.bucket.generate_url, settings.TEMP_URL_SECS, 'GET'),
                 params=params,
-                expects=(200, 404, ),
+                expects=(200, 404,),
                 throws=exceptions.MetadataError,
             )
         else:
             resp = await self.make_request(
                 'HEAD',
                 functools.partial(self.bucket.new_key(prefix).generate_url, settings.TEMP_URL_SECS, 'HEAD'),
-                expects=(200, 404, ),
+                expects=(200, 404,),
                 throws=exceptions.MetadataError,
             )
 
@@ -163,7 +182,7 @@ class S3CompatProvider(provider.BaseProvider):
             'PUT', url,
             skip_auto_headers={'CONTENT-TYPE'},
             headers=headers,
-            expects=(200, ),
+            expects=(200,),
             throws=exceptions.IntraCopyError,
         )
 
@@ -325,7 +344,7 @@ class S3CompatProvider(provider.BaseProvider):
             data=stream,
             skip_auto_headers={'CONTENT-TYPE'},
             headers=headers,
-            expects=(200, 201, ),
+            expects=(200, 201,),
             throws=exceptions.UploadError,
         )
         await resp.release()
@@ -603,16 +622,40 @@ class S3CompatProvider(provider.BaseProvider):
         if path.is_file:
             # Check and delete all versions of the file
             try:
-                versions = await self.revisions(path)
-                # Delete each version of the file
-                for version in versions:
+                prefix = path.full_path.lstrip('/')  # '/' -> '', '/A/B' -> 'A/B'
+                # "versions" in "query_parameters" is required for generate_url().
+                # SignatureDoesNotMatch is returned when "versions" is not specified.
+                query_params = {'prefix': prefix, 'delimiter': '/', 'versions': ''}
+                _, versions, delete_markers = await self.get_full_revision(query_params)
+                full_version_list = versions + delete_markers
+                if len(full_version_list) > 0:
+                    version_dict = {path.full_path: [version.get('VersionId') for version in full_version_list]}
+                    payload_version = prepare_xml_body(version_dict)
+                    # Delete all versions of each object
+                    md5 = compute_md5(BytesIO(payload_version))
+
+                    query_params = {'delete': ''}
+                    headers = {
+                        'Content-Length': str(len(payload_version)),
+                        'Content-MD5': md5[1],
+                        'Content-Type': 'text/xml',
+                    }
+
+                    # We depend on a customized version of boto that can make query parameters part of
+                    # the signature.
+                    url = functools.partial(
+                        self.bucket.generate_url,
+                        settings.TEMP_URL_SECS,
+                        'POST',
+                        query_parameters=query_params,
+                        headers=headers,
+                    )
                     resp = await self.make_request(
-                        'DELETE',
-                        self.bucket.new_key(path.full_path).generate_url(
-                            settings.TEMP_URL_SECS,
-                            'DELETE',
-                            query_parameters={'versionId': version.raw['VersionId']}
-                        ),
+                        'POST',
+                        url,
+                        params=query_params,
+                        data=payload_version,
+                        headers=headers,
                         expects=(200, 204,),
                         throws=exceptions.DeleteError,
                     )
@@ -642,7 +685,7 @@ class S3CompatProvider(provider.BaseProvider):
             'GET',
             self.bucket.generate_url(settings.TEMP_URL_SECS, 'GET'),
             params=query_params,
-            expects=(200, ),
+            expects=(200,),
             throws=exceptions.MetadataError,
         )
         contents = await resp.read()
@@ -677,46 +720,26 @@ class S3CompatProvider(provider.BaseProvider):
             raise exceptions.InvalidParameters('not a folder: {}'.format(str(path)))
 
         more_to_come = True
-        content_keys = []
         prefix = path.full_path.lstrip('/')  # '/' -> '', '/A/B/' -> 'A/B/'
         query_params = {'prefix': prefix, 'versions': ''}
         key_marker = None
         version_marker = None
-
+        content_dicts = {}
+        content_dicts_list = []
         while more_to_come:
+            content_dicts = {}
             if key_marker is not None:
                 query_params['key-marker'] = key_marker
             if version_marker is not None:
                 query_params['version-id-marker'] = version_marker
 
-            resp = await self.make_request(
-                'GET',
-                functools.partial(self.bucket.generate_url, settings.TEMP_URL_SECS, 'GET', query_parameters=query_params),
-                params=query_params,
-                expects=(200, ),
-                throws=exceptions.MetadataError,
-            )
-
-            contents = await resp.read()
-            parsed = xmltodict.parse(contents, strip_whitespace=False)['ListVersionsResult']
+            parsed, versions, delete_markers = await self.get_full_revision(query_params)
             more_to_come = parsed.get('IsTruncated') == 'true'
-
-            # Get both current versions and delete markers
-            versions = parsed.get('Version', [])
-            delete_markers = parsed.get('DeleteMarker', [])
-
-            if isinstance(versions, dict):
-                versions = [versions]
-            if isinstance(delete_markers, dict):
-                delete_markers = [delete_markers]
-
             # Process versions and delete markers
             for version in versions + delete_markers:
-                content_keys.append({
-                    'key': version['Key'],
-                    'version_id': version.get('VersionId')
-                })
-
+                content_dicts.setdefault(version['Key'], []).append(version.get('VersionId'))
+            if len(content_dicts) > 0:
+                content_dicts_list.append(content_dicts)
             if more_to_come:
                 key_marker = parsed.get('NextKeyMarker')
                 version_marker = parsed.get('NextVersionIdMarker')
@@ -724,41 +747,71 @@ class S3CompatProvider(provider.BaseProvider):
                     more_to_come = False
 
         # Query against non-existent folder does not return 404
-        if len(content_keys) == 0:
+        if len(content_dicts) == 0:
             # MinIO cannot return Contents with a leaf folder itself.
             if await self._folder_prefix_exists(prefix):
-                content_keys = [{'key': prefix, 'version_id': None}]
+                content_dicts = {prefix, None}
+                content_dicts_list.append(content_dicts)
             else:
                 raise exceptions.NotFoundError(str(path))
 
-        # Delete all versions of each object
-        for content in content_keys[::-1]:
-            try:
-                if content['version_id'] is not None:
-                    # Delete specific version
-                    resp = await self.make_request(
-                        'DELETE',
-                        self.bucket.new_key(content['key']).generate_url(
-                            settings.TEMP_URL_SECS,
-                            'DELETE',
-                            query_parameters={'versionId': content['version_id']}
-                        ),
-                        expects=(200, 204, ),
-                        throws=exceptions.DeleteError,
-                    )
-                else:
-                    # Delete current version if version_id is not specified
-                    resp = await self.make_request(
-                        'DELETE',
-                        self.bucket.new_key(content['key']).generate_url(settings.TEMP_URL_SECS, 'DELETE'),
-                        expects=(200, 204, ),
-                        throws=exceptions.DeleteError,
-                    )
-                await resp.release()
-            except exceptions.DeleteError as e:
-                logger.warning('Failed to delete object: key={}, version_id={}, error={}'.format(
-                    content['key'], content['version_id'], str(e)))
-                raise
+        for content_dicts in content_dicts_list:
+            # Delete all versions of each object
+            payload_version = prepare_xml_body(content_dicts)
+            # Delete new function
+            md5 = compute_md5(BytesIO(payload_version))
+
+            query_params = {'delete': ''}
+            headers = {
+                'Content-Length': str(len(payload_version)),
+                'Content-MD5': md5[1],
+                'Content-Type': 'text/xml',
+            }
+
+            # We depend on a customized version of boto that can make query parameters part of
+            # the signature.
+            url = functools.partial(
+                self.bucket.generate_url,
+                settings.TEMP_URL_SECS,
+                'POST',
+                query_parameters=query_params,
+                headers=headers,
+            )
+            resp = await self.make_request(
+                'POST',
+                url,
+                params=query_params,
+                data=payload_version,
+                headers=headers,
+                expects=(200, 204,),
+                throws=exceptions.DeleteError,
+            )
+            await resp.release()
+
+    async def get_full_revision(self, query_params):
+        """
+        Get all versions and delete markers of the requested object
+        :param query_params: The query parameters to be used in the request
+        :return: The dict of response content, list versions and delete_markers
+        """
+        resp = await self.make_request(
+            'GET',
+            functools.partial(self.bucket.generate_url, settings.TEMP_URL_SECS, 'GET', query_parameters=query_params),
+            params=query_params,
+            expects=(200,),
+            throws=exceptions.MetadataError,
+        )
+
+        contents = await resp.read()
+        parsed = xmltodict.parse(contents, strip_whitespace=False)['ListVersionsResult']
+        versions = parsed.get('Version', [])
+        delete_markers = parsed.get('DeleteMarker', [])
+
+        if isinstance(versions, dict):
+            versions = [versions]
+        if isinstance(delete_markers, dict):
+            delete_markers = [delete_markers]
+        return parsed, versions, delete_markers
 
     async def revisions(self, path, **kwargs):
         """Get past versions of the requested key
@@ -829,11 +882,11 @@ class S3CompatProvider(provider.BaseProvider):
                 raise exceptions.FolderNamingConflict(path.name)
 
         async with self.request(
-            'PUT',
-            functools.partial(self.bucket.new_key(path.full_path).generate_url, settings.TEMP_URL_SECS, 'PUT'),
-            skip_auto_headers={'CONTENT-TYPE'},
-            expects=(200, 201, ),
-            throws=exceptions.CreateFolderError
+                'PUT',
+                functools.partial(self.bucket.new_key(path.full_path).generate_url, settings.TEMP_URL_SECS, 'PUT'),
+                skip_auto_headers={'CONTENT-TYPE'},
+                expects=(200, 201,),
+                throws=exceptions.CreateFolderError
         ):
             return S3CompatFolderMetadata(self, {'Prefix': path.full_path})
 
@@ -848,7 +901,7 @@ class S3CompatProvider(provider.BaseProvider):
                 'HEAD',
                 query_parameters={'versionId': revision} if revision else None
             ),
-            expects=(200, ),
+            expects=(200,),
             throws=exceptions.MetadataError,
         )
         await resp.release()
@@ -863,7 +916,7 @@ class S3CompatProvider(provider.BaseProvider):
             'GET',
             functools.partial(self.bucket.generate_url, settings.TEMP_URL_SECS, 'GET'),
             params=params,
-            expects=(200, ),
+            expects=(200,),
             throws=exceptions.MetadataError,
         )
 
@@ -882,7 +935,7 @@ class S3CompatProvider(provider.BaseProvider):
             resp = await self.make_request(
                 'HEAD',
                 functools.partial(self.bucket.new_key(prefix).generate_url, settings.TEMP_URL_SECS, 'HEAD'),
-                expects=(200, ),
+                expects=(200,),
                 throws=exceptions.MetadataError,
             )
             await resp.release()
