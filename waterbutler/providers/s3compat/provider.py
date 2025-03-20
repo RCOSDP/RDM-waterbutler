@@ -56,14 +56,14 @@ class S3CompatConnection(S3Connection):
                  suppress_consec_slashes=True, anon=False,
                  validate_certs=None, profile_name=None):
         super(S3CompatConnection, self).__init__(aws_access_key_id,
-                                                 aws_secret_access_key,
-                                                 is_secure, port, proxy, proxy_port, proxy_user, proxy_pass,
-                                                 host=host,
-                                                 debug=debug, https_connection_factory=https_connection_factory,
-                                                 calling_format=calling_format,
-                                                 path=path, provider=provider, bucket_class=bucket_class,
-                                                 security_token=security_token, anon=anon,
-                                                 validate_certs=validate_certs, profile_name=profile_name)
+                aws_secret_access_key,
+                is_secure, port, proxy, proxy_port, proxy_user, proxy_pass,
+                host=host,
+                debug=debug, https_connection_factory=https_connection_factory,
+                calling_format=calling_format,
+                path=path, provider=provider, bucket_class=bucket_class,
+                security_token=security_token, anon=anon,
+                validate_certs=validate_certs, profile_name=profile_name)
 
     def _required_auth_capability(self):
         return ['s3']
@@ -131,14 +131,14 @@ class S3CompatProvider(provider.BaseProvider):
                 'GET',
                 functools.partial(self.bucket.generate_url, settings.TEMP_URL_SECS, 'GET'),
                 params=params,
-                expects=(200, 404,),
+                expects=(200, 404, ),
                 throws=exceptions.MetadataError,
             )
         else:
             resp = await self.make_request(
                 'HEAD',
                 functools.partial(self.bucket.new_key(prefix).generate_url, settings.TEMP_URL_SECS, 'HEAD'),
-                expects=(200, 404,),
+                expects=(200, 404, ),
                 throws=exceptions.MetadataError,
             )
 
@@ -182,7 +182,7 @@ class S3CompatProvider(provider.BaseProvider):
             'PUT', url,
             skip_auto_headers={'CONTENT-TYPE'},
             headers=headers,
-            expects=(200,),
+            expects=(200, ),
             throws=exceptions.IntraCopyError,
         )
 
@@ -344,7 +344,7 @@ class S3CompatProvider(provider.BaseProvider):
             data=stream,
             skip_auto_headers={'CONTENT-TYPE'},
             headers=headers,
-            expects=(200, 201,),
+            expects=(200, 201, ),
             throws=exceptions.UploadError,
         )
         await resp.release()
@@ -685,7 +685,7 @@ class S3CompatProvider(provider.BaseProvider):
             'GET',
             self.bucket.generate_url(settings.TEMP_URL_SECS, 'GET'),
             params=query_params,
-            expects=(200,),
+            expects=(200, ),
             throws=exceptions.MetadataError,
         )
         contents = await resp.read()
@@ -882,11 +882,11 @@ class S3CompatProvider(provider.BaseProvider):
                 raise exceptions.FolderNamingConflict(path.name)
 
         async with self.request(
-                'PUT',
-                functools.partial(self.bucket.new_key(path.full_path).generate_url, settings.TEMP_URL_SECS, 'PUT'),
-                skip_auto_headers={'CONTENT-TYPE'},
-                expects=(200, 201,),
-                throws=exceptions.CreateFolderError
+            'PUT',
+            functools.partial(self.bucket.new_key(path.full_path).generate_url, settings.TEMP_URL_SECS, 'PUT'),
+            skip_auto_headers={'CONTENT-TYPE'},
+            expects=(200, 201, ),
+            throws=exceptions.CreateFolderError
         ):
             return S3CompatFolderMetadata(self, {'Prefix': path.full_path})
 
@@ -901,7 +901,7 @@ class S3CompatProvider(provider.BaseProvider):
                 'HEAD',
                 query_parameters={'versionId': revision} if revision else None
             ),
-            expects=(200,),
+            expects=(200, ),
             throws=exceptions.MetadataError,
         )
         await resp.release()
@@ -916,7 +916,7 @@ class S3CompatProvider(provider.BaseProvider):
             'GET',
             functools.partial(self.bucket.generate_url, settings.TEMP_URL_SECS, 'GET'),
             params=params,
-            expects=(200,),
+            expects=(200, ),
             throws=exceptions.MetadataError,
         )
 
@@ -935,7 +935,7 @@ class S3CompatProvider(provider.BaseProvider):
             resp = await self.make_request(
                 'HEAD',
                 functools.partial(self.bucket.new_key(prefix).generate_url, settings.TEMP_URL_SECS, 'HEAD'),
-                expects=(200,),
+                expects=(200, ),
                 throws=exceptions.MetadataError,
             )
             await resp.release()
