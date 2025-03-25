@@ -15,7 +15,8 @@ from waterbutler.core.metadata import BaseMetadata
 from waterbutler.providers.osfstorage.metadata import OsfStorageFileMetadata
 from waterbutler.providers.osfstorage.metadata import OsfStorageFolderMetadata
 from waterbutler.providers.osfstorage.metadata import OsfStorageRevisionMetadata
-
+import datetime
+import time
 logger = logging.getLogger(__name__)
 
 QUERY_METHODS = ('GET', 'DELETE')
@@ -207,6 +208,9 @@ class OSFStorageProvider(provider.BaseProvider):
         Finally, WB constructs its metadata response and sends that back to the original request
         issuer.
         """
+        begin = time.time()
+        logger.info(
+            f"--------------Begin upload osfstorage : {datetime.datetime.fromtimestamp(begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
         metadata = await self._send_to_storage_provider(stream, path, **kwargs)
         metadata = metadata.serialized()
 
@@ -228,6 +232,11 @@ class OSFStorageProvider(provider.BaseProvider):
         })
 
         path._parts[-1]._id = metadata['path'].strip('/')
+        logger.info(
+            f"--------------End upload osfstorage : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        logger.info(
+            f"--------------Total time upload osfstorage : {datetime.datetime.fromtimestamp(time.time() - begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
+
         return OsfStorageFileMetadata(metadata, str(path)), created
 
     async def delete(self, path, confirm_delete=0, **kwargs):
@@ -512,6 +521,9 @@ class OSFStorageProvider(provider.BaseProvider):
 
         :return: metadata of the file as it exists on the storage provider
         """
+        begin = time.time()
+        logger.info(
+            f"--------------Begin _send_to_storage_provider : {datetime.datetime.fromtimestamp(begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
 
         pending_name = str(uuid.uuid4())
         provider = self.make_provider(self.settings)
@@ -523,21 +535,28 @@ class OSFStorageProvider(provider.BaseProvider):
         stream.add_writer('sha256', streams.HashStreamWriter(hashlib.sha256))
         stream.add_writer('sha512', streams.HashStreamWriter(hashlib.sha512))
 
+        begin_call_upload = time.time()
+        logger.info(
+            f"--------------Begin call upload : {datetime.datetime.fromtimestamp(begin_call_upload).strftime('%H:%M:%S.%f')[:-3]}--------------")
         await provider.upload(stream, remote_pending_path, check_created=False,
                               fetch_metadata=False, **kwargs)
+        logger.info(
+            f"--------------End call upload : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        logger.info(
+            f"--------------Total time call upload : {datetime.datetime.fromtimestamp(time.time() - begin_call_upload).strftime('%H:%M:%S.%f')[:-3]}--------------")
 
         complete_name = stream.writers['sha256'].hexdigest
         remote_complete_path = await provider.validate_path('/' + complete_name)
 
         try:
-            begin = time.time()
+            begin_metadata = time.time()
             logger.info(
-                f"--------------Begin metadata : {datetime.datetime.fromtimestamp(begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
+                f"--------------Begin metadata : {datetime.datetime.fromtimestamp(begin_metadata).strftime('%H:%M:%S.%f')[:-3]}--------------")
             metadata = await provider.metadata(remote_complete_path)
             logger.info(
                 f"--------------End metadata : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
             logger.info(
-                f"--------------Total time metadata : {datetime.datetime.fromtimestamp(time.time() - begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
+                f"--------------Total time metadata : {datetime.datetime.fromtimestamp(time.time() - begin_metadata).strftime('%H:%M:%S.%f')[:-3]}--------------")
         except (exceptions.MetadataError, exceptions.NotFoundError) as e:
             if e.code != 404:
                 raise
@@ -545,6 +564,10 @@ class OSFStorageProvider(provider.BaseProvider):
         else:
             await provider.delete(remote_pending_path)
 
+        logger.info(
+            f"--------------End _send_to_storage_provider : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        logger.info(
+            f"--------------Total time _send_to_storage_provider : {datetime.datetime.fromtimestamp(time.time() - begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
         return metadata
 
     async def _send_to_metadata_provider(self, stream, path, metadata, **kwargs):
