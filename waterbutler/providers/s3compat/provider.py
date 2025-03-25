@@ -24,7 +24,10 @@ from waterbutler.providers.s3compat.metadata import (S3CompatRevision,
                                                      S3CompatFolderKeyMetadata,
                                                      S3CompatFileMetadataHeaders,
                                                      )
-
+import datetime
+import time
+import inspect
+from waterbutler.utils import inspect_info
 logger = logging.getLogger(__name__)
 
 
@@ -295,6 +298,9 @@ class S3CompatProvider(provider.BaseProvider):
         return size, etag
 
     async def upload(self, stream, path, conflict='replace', **kwargs):
+        logger.info('----{}:{}::{} from {}:{}::{}'.format(*inspect_info(inspect.currentframe(), inspect.stack())))
+        begin = time.time()
+        logger.info(f"--------------Begin upload file in s3compact : {datetime.datetime.fromtimestamp(begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
         """Uploads the given stream to S3 Compatible Storage
 
         :param waterbutler.core.streams.RequestWrapper stream: The stream to put to S3 Compatible Storage
@@ -309,6 +315,8 @@ class S3CompatProvider(provider.BaseProvider):
         else:
             await self._chunked_upload(stream, path)
 
+        logger.info(f"--------------End upload file in s3compact : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        logger.info(f"--------------Total time upload file in s3compact : {datetime.datetime.fromtimestamp(time.time() - begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
         return (await self.metadata(path, **kwargs)), not exists
 
     async def _contiguous_upload(self, stream, path):
@@ -604,6 +612,9 @@ class S3CompatProvider(provider.BaseProvider):
         :param path: ( :class:`.WaterButlerPath` ) The path of the key to delete
         :param int confirm_delete: Must be 1 to confirm root folder delete
         """
+        logger.info('----{}:{}::{} from {}:{}::{}'.format(*inspect_info(inspect.currentframe(), inspect.stack())))
+        begin = time.time()
+        logger.info(f"--------------Begin delete file in s3compact : {datetime.datetime.fromtimestamp(begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
         if path.is_root:
             if not confirm_delete == 1:
                 raise exceptions.DeleteError(
@@ -621,6 +632,10 @@ class S3CompatProvider(provider.BaseProvider):
             await resp.release()
         else:
             await self._delete_folder(path, **kwargs)
+        
+        logger.info(f"--------------End delete file in s3compact : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        logger.info(f"--------------Total time delete file in s3compact : {datetime.datetime.fromtimestamp(time.time() - begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
+
 
     async def _folder_prefix_exists(self, folder_prefix):
         # Even if the storage is MinIO, Contents with a leaf folder is
@@ -790,6 +805,8 @@ class S3CompatProvider(provider.BaseProvider):
             return S3CompatFolderMetadata(self, {'Prefix': path.full_path})
 
     async def _metadata_file(self, path, revision=None):
+        begin = time.time()
+        logger.info(f"--------------Begin _metadata_file in s3compact : {datetime.datetime.fromtimestamp(begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
         if revision == 'Latest':
             revision = None
         resp = await self.make_request(
@@ -804,6 +821,9 @@ class S3CompatProvider(provider.BaseProvider):
             throws=exceptions.MetadataError,
         )
         await resp.release()
+        logger.info(f"--------------End _metadata_file in s3compact : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        logger.info(f"--------------Total time _metadata_file in s3compact : {datetime.datetime.fromtimestamp(time.time() - begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
+
         return S3CompatFileMetadataHeaders(self, path.full_path, resp.headers)
 
     async def _metadata_folder(self, path, next_token=None):

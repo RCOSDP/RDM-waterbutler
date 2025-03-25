@@ -530,7 +530,14 @@ class OSFStorageProvider(provider.BaseProvider):
         remote_complete_path = await provider.validate_path('/' + complete_name)
 
         try:
+            begin = time.time()
+            logger.info(
+                f"--------------Begin metadata : {datetime.datetime.fromtimestamp(begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
             metadata = await provider.metadata(remote_complete_path)
+            logger.info(
+                f"--------------End metadata : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+            logger.info(
+                f"--------------Total time metadata : {datetime.datetime.fromtimestamp(time.time() - begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
         except (exceptions.MetadataError, exceptions.NotFoundError) as e:
             if e.code != 404:
                 raise
@@ -546,7 +553,9 @@ class OSFStorageProvider(provider.BaseProvider):
 
         :return: metadata of the file and a bool indicating if the file was newly created
         """
-
+        begin = time.time()
+        logger.info(
+            f"--------------Begin _send_to_metadata_provider : {datetime.datetime.fromtimestamp(begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
         resp = await self.make_signed_request(
             'POST',
             self.build_url(path.parent.identifier, 'children'),
@@ -573,5 +582,8 @@ class OSFStorageProvider(provider.BaseProvider):
         )
         created = resp.status == 201
         data = await resp.json()
-
+        logger.info(
+            f"--------------End _send_to_metadata_provider : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        logger.info(
+            f"--------------Total time _send_to_metadata_provider : {datetime.datetime.fromtimestamp(time.time() - begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
         return data, created

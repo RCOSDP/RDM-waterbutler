@@ -29,12 +29,15 @@ logger = logging.getLogger(__name__)
 _THROTTLES = weakref.WeakKeyDictionary()  # type: weakref.WeakKeyDictionary
 NO_URL_ENCODED_PROVIDERS = ['nextcloud', 'owncloud', 'nextcloudinstitutions']
 QUERY_METHODS = ('GET', 'DELETE')
-
+import datetime
+import inspect
+from waterbutler.utils import inspect_info
 
 def throttle(concurrency=10, interval=1):
     def _throttle(func):
         @functools.wraps(func)
         async def wrapped(*args, **kwargs):
+            logger.info('----{}:{}::{} from {}:{}::{}'.format(*inspect_info(inspect.currentframe(), inspect.stack())))
             if asyncio.get_event_loop() not in _THROTTLES:
                 count, last_call, event = 0, time.time(), asyncio.Event()
                 _THROTTLES[asyncio.get_event_loop()] = (count, last_call, event)
@@ -278,7 +281,8 @@ class BaseProvider(metaclass=abc.ABCMeta):
         :raises: :class:`.UnhandledProviderError` Raised if expects is defined
         :raises: :class:`.WaterButlerError` Raised if invalid HTTP method is provided
         """
-
+        begin = time.time()
+        logger.info(f"--------------Begin make_request : {datetime.datetime.fromtimestamp(begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
         force_retry_on = kwargs.pop('force_retry_on', set())
         kwargs['headers'] = self.build_headers(**kwargs.get('headers', {}))
         no_auth_header = kwargs.pop('no_auth_header', False)
@@ -295,12 +299,17 @@ class BaseProvider(metaclass=abc.ABCMeta):
 
         method = method.upper()
         while retry >= 0:
+            logger.warning('====Start loop make request====')
             # Don't overwrite the callable ``url`` so that signed URLs are refreshed for every retry
             non_callable_url = url() if callable(url) else url
             if self.NAME not in NO_URL_ENCODED_PROVIDERS:
                 # Fix storage 'nextcloud', 'owncloud', 'nextcloudinstitutions' return HTTP 400 bad request
                 non_callable_url = URL(non_callable_url, encoded=True)
             try:
+                logger.info('----{}:{}::{} from {}:{}::{}'.format(*inspect_info(inspect.currentframe(), inspect.stack())))
+                logger.warning(f'retry num is {retry}')
+                logger.warning(f'force_retry_on is {force_retry_on}')
+                logger.warning(f'call request non_callable_url {non_callable_url} with method {method} and kwargs {kwargs}')
                 self.provider_metrics.incr('requests.count')
                 # TODO: use a `dict` to select methods with either `lambda` or `functools.partial`
                 if method == 'GET':
@@ -334,18 +343,32 @@ class BaseProvider(metaclass=abc.ABCMeta):
                 else:
                     raise exceptions.WaterButlerError('Unsupported HTTP method ...')
                 self.provider_metrics.incr('requests.tally.ok')
+                #logger.warning(f'response.content of {method} {non_callable_url} is {response.content}')
+                logger.warning(f'response.status of {method} {non_callable_url} is {response.status}')
                 if (retry > 0 and response.status in force_retry_on) or (expects and response.status not in expects):
+                    logger.warning('=======================Retry==============================')
+                    logger.warning(f'retry request non_callable_url {non_callable_url} with method {method} and kwargs {kwargs}')
                     unexpected = await exceptions.exception_from_response(response,
                                                                           error=throws, **kwargs)
+                    logger.warning('=======================End retry==============================')
+                    logger.warning(f'unexpected is {unexpected}')
                     raise unexpected
+                logger.warning('====End loop make request====')
+                logger.info(f"--------------End make_request : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+                logger.info(f"--------------Total time make_request : {datetime.datetime.fromtimestamp(time.time() - begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
+
                 return response
             except throws as e:
+                logger.warning('=======================Except==============================')
+                logger.warning(f'retry {retry}')
                 self.provider_metrics.incr('requests.tally.nok')
                 if retry <= 0 or e.code not in force_retry_on.union(self._retry_on):
                     raise
                 # Seconds equals twice the 'n' attempt
                 sleep_seconds = (1 + _retry - retry) * 2
+                logger.warning(f'sleep_seconds {sleep_seconds}')
                 await asyncio.sleep(sleep_seconds)
+                logger.warning('=======================End except==============================')
                 retry -= 1
 
     def request(self, *args, **kwargs):
