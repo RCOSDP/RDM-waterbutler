@@ -548,8 +548,8 @@ class OSFStorageProvider(provider.BaseProvider):
         complete_name = stream.writers['sha256'].hexdigest
         remote_complete_path = await provider.validate_path('/' + complete_name)
 
+        begin_metadata = time.time()
         try:
-            begin_metadata = time.time()
             logger.info(
                 f"--------------Begin metadata : {datetime.datetime.fromtimestamp(begin_metadata).strftime('%H:%M:%S.%f')[:-3]}--------------")
             metadata = await provider.metadata(remote_complete_path)
@@ -560,9 +560,27 @@ class OSFStorageProvider(provider.BaseProvider):
         except (exceptions.MetadataError, exceptions.NotFoundError) as e:
             if e.code != 404:
                 raise
+            logger.info(
+                f"--------------End metadata : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+            logger.info(
+                f"--------------Total time metadata : {datetime.datetime.fromtimestamp(time.time() - begin_metadata).strftime('%H:%M:%S.%f')[:-3]}--------------")
+            begin_move = time.time()
+            logger.info(
+                f"--------------Begin move osfstorage : {datetime.datetime.fromtimestamp(begin_move).strftime('%H:%M:%S.%f')[:-3]}--------------")
             metadata, _ = await provider.move(provider, remote_pending_path, remote_complete_path)
+            logger.info(
+                f"--------------End move osfstorage : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+            logger.info(
+                f"--------------Total time move osfstorage : {datetime.datetime.fromtimestamp(time.time() - begin_move).strftime('%H:%M:%S.%f')[:-3]}--------------")
         else:
+            begin_delete = time.time()
+            logger.info(
+                f"--------------Begin delete osfstorage : {datetime.datetime.fromtimestamp(begin_delete).strftime('%H:%M:%S.%f')[:-3]}--------------")
             await provider.delete(remote_pending_path)
+            logger.info(
+                f"--------------End delete osfstorage : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+            logger.info(
+                f"--------------Total time delete osfstorage : {datetime.datetime.fromtimestamp(time.time() - begin_delete).strftime('%H:%M:%S.%f')[:-3]}--------------")
 
         logger.info(
             f"--------------End _send_to_storage_provider : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
