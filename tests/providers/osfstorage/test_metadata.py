@@ -26,6 +26,7 @@ class TestFileMetadata:
 
         extra_expected = {
             'checkout': None,
+            'locked': False,
             'downloads': 0,
             'guid': None,
             'hashes': {
