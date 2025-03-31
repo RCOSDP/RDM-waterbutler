@@ -24,6 +24,8 @@ from waterbutler.server.api.v1.provider.movecopy import MoveCopyMixin
 
 logger = logging.getLogger(__name__)
 auth_handler = AuthHandler(settings.AUTH_HANDLERS)
+import datetime
+import time
 
 
 def list_or_value(value):
@@ -44,6 +46,8 @@ class ProviderHandler(core.BaseHandler, CreateMixin, MetadataMixin, MoveCopyMixi
     callback_log = True
 
     async def prepare(self, *args, **kwargs):
+        begin = time.time()
+        logger.info(f"--------------Begin prepare : {datetime.datetime.fromtimestamp(begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
         method = self.request.method.lower()
 
         # TODO Find a nicer way to handle this
@@ -111,6 +115,10 @@ class ProviderHandler(core.BaseHandler, CreateMixin, MetadataMixin, MoveCopyMixi
         self.body = b''
 
         self.add_header('X-WATERBUTLER-REQUEST-ID', str(uuid.uuid4()))
+        logger.info(
+            f"--------------End prepare : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        logger.info(
+            f"--------------Total time prepare : {datetime.datetime.fromtimestamp(time.time() - begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
 
     async def head(self, **_):
         """Get metadata for a folder or file

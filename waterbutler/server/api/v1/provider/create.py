@@ -49,7 +49,8 @@ class CreateMixin:
         allow entites of different types to have the same name (e.g. Github), we also check to make
         sure that such an entity does not exist.
         """
-
+        begin = time.time()
+        logger.info(f"--------------Begin postvalidate_put : {datetime.datetime.fromtimestamp(begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
         self.childs_name = self.get_query_argument('name', default=None)
         if self.childs_name is not None and settings.FILENAME_NORMALIZATION_RULE is not None:
             self.childs_name = unicodedata.normalize(settings.FILENAME_NORMALIZATION_RULE, self.childs_name)
@@ -99,13 +100,25 @@ class CreateMixin:
             quota = await self.provider.get_quota()
             if quota['used'] + file_size > quota['max']:
                 raise exceptions.NotEnoughQuotaError('You do not have enough available quota.')
+        logger.info(
+            f"--------------End postvalidate_put : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        logger.info(
+            f"--------------Total time postvalidate_put : {datetime.datetime.fromtimestamp(time.time() - begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
 
     async def create_folder(self):
+        begin = time.time()
+        logger.info(f"--------------Begin create_folder : {datetime.datetime.fromtimestamp(begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
         self.metadata = await self.provider.create_folder(self.target_path)
         self.set_status(201)
         self.write({'data': self.metadata.json_api_serialized(self.resource)})
+        logger.info(
+            f"--------------End create_folder : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        logger.info(
+            f"--------------Total time create_folder : {datetime.datetime.fromtimestamp(time.time() - begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
 
     async def upload_file(self):
+        begin = time.time()
+        logger.info(f"--------------Begin upload_file : {datetime.datetime.fromtimestamp(begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
         self.writer.write_eof()
 
         self.metadata, created = await self.uploader
@@ -115,3 +128,7 @@ class CreateMixin:
             self.set_status(201)
 
         self.write({'data': self.metadata.json_api_serialized(self.resource)})
+        logger.info(
+            f"--------------End upload_file : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        logger.info(
+            f"--------------Total time upload_file : {datetime.datetime.fromtimestamp(time.time() - begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
