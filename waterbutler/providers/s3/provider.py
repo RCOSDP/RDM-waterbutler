@@ -205,12 +205,16 @@ class S3Provider(provider.BaseProvider):
         else:
             await self._chunked_upload(stream, path)
 
-        data = (await self.metadata(path, **kwargs)), not exists
-
         logger.info(
             f"--------------End upload file in s3 : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
         logger.info(
             f"--------------Total time upload file in s3 : {datetime.datetime.fromtimestamp(time.time() - begin_upload_s3).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        begin_metadata = time.time()
+        logger.info(f"--------------Begin metadata in s3 : {datetime.datetime.fromtimestamp(begin_metadata).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        data = (await self.metadata(path, **kwargs)), not exists
+        logger.info(f"--------------End metadata in s3 : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        logger.info(f"--------------Total time metadata in s3 : {datetime.datetime.fromtimestamp(time.time() - begin_metadata).strftime('%H:%M:%S.%f')[:-3]}--------------")
+
         return data
 
     async def _contiguous_upload(self, stream, path):
