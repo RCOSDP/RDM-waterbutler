@@ -5,6 +5,7 @@ import functools
 import datetime
 import time
 from urllib import parse
+import inspect
 
 import xmltodict
 import xml.sax.saxutils
@@ -522,7 +523,6 @@ class S3Provider(provider.BaseProvider):
 
         logger.info(f"--------------End delete file in s3 : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
         logger.info(f"--------------Total time delete file in s3 : {datetime.datetime.fromtimestamp(time.time() - begin_delete_s3).strftime('%H:%M:%S.%f')[:-3]}--------------")
-
 
     async def _delete_folder(self, path, **kwargs):
         """Query for recursive contents of folder and delete in batches of 1000

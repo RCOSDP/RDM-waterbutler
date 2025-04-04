@@ -2,6 +2,7 @@ import json
 from http import HTTPStatus
 import time
 import datetime
+import logging
 
 from waterbutler import tasks
 from waterbutler.sizes import MBs
@@ -14,7 +15,6 @@ from waterbutler.core.utils import make_provider
 from waterbutler.constants import DEFAULT_CONFLICT
 from waterbutler.auth.osf.handler import EXPORT_DATA_FAKE_NODE_ID
 from waterbutler.tasks.settings import SYNCHRONOUS_TIMEOUT
-from waterbutler.utils import inspect_info
 
 
 logger = logging.getLogger(__name__)
