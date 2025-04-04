@@ -299,8 +299,8 @@ class S3CompatProvider(provider.BaseProvider):
 
     async def upload(self, stream, path, conflict='replace', **kwargs):
         logger.info('----{}:{}::{} from {}:{}::{}'.format(*inspect_info(inspect.currentframe(), inspect.stack())))
-        begin = time.time()
-        logger.info(f"--------------Begin upload file in s3compact : {datetime.datetime.fromtimestamp(begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        begin_upload_s3compact = time.time()
+        logger.info(f"--------------Begin upload file in s3compact : {datetime.datetime.fromtimestamp(begin_upload_s3compact).strftime('%H:%M:%S.%f')[:-3]}--------------")
         """Uploads the given stream to S3 Compatible Storage
 
         :param waterbutler.core.streams.RequestWrapper stream: The stream to put to S3 Compatible Storage
@@ -316,8 +316,14 @@ class S3CompatProvider(provider.BaseProvider):
             await self._chunked_upload(stream, path)
 
         logger.info(f"--------------End upload file in s3compact : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
-        logger.info(f"--------------Total time upload file in s3compact : {datetime.datetime.fromtimestamp(time.time() - begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
-        return (await self.metadata(path, **kwargs)), not exists
+        logger.info(f"--------------Total time upload file in s3compact : {datetime.datetime.fromtimestamp(time.time() - begin_upload_s3compact).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        begin_metadata = time.time()
+        logger.info(f"--------------Begin metadata in s3compact : {datetime.datetime.fromtimestamp(begin_metadata).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        data = (await self.metadata(path, **kwargs)), not exists
+        logger.info(f"--------------End metadata in s3compact : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        logger.info(f"--------------Total time metadata in s3compact : {datetime.datetime.fromtimestamp(time.time() - begin_metadata).strftime('%H:%M:%S.%f')[:-3]}--------------")
+
+        return data
 
     async def _contiguous_upload(self, stream, path):
         """Uploads the given stream in one request.
@@ -613,8 +619,8 @@ class S3CompatProvider(provider.BaseProvider):
         :param int confirm_delete: Must be 1 to confirm root folder delete
         """
         logger.info('----{}:{}::{} from {}:{}::{}'.format(*inspect_info(inspect.currentframe(), inspect.stack())))
-        begin = time.time()
-        logger.info(f"--------------Begin delete file in s3compact : {datetime.datetime.fromtimestamp(begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        begin_delete_s3compact = time.time()
+        logger.info(f"--------------Begin delete file in s3compact : {datetime.datetime.fromtimestamp(begin_delete_s3compact).strftime('%H:%M:%S.%f')[:-3]}--------------")
         if path.is_root:
             if not confirm_delete == 1:
                 raise exceptions.DeleteError(
@@ -634,7 +640,7 @@ class S3CompatProvider(provider.BaseProvider):
             await self._delete_folder(path, **kwargs)
         
         logger.info(f"--------------End delete file in s3compact : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
-        logger.info(f"--------------Total time delete file in s3compact : {datetime.datetime.fromtimestamp(time.time() - begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        logger.info(f"--------------Total time delete file in s3compact : {datetime.datetime.fromtimestamp(time.time() - begin_delete_s3compact).strftime('%H:%M:%S.%f')[:-3]}--------------")
 
 
     async def _folder_prefix_exists(self, folder_prefix):
@@ -805,8 +811,8 @@ class S3CompatProvider(provider.BaseProvider):
             return S3CompatFolderMetadata(self, {'Prefix': path.full_path})
 
     async def _metadata_file(self, path, revision=None):
-        begin = time.time()
-        logger.info(f"--------------Begin _metadata_file in s3compact : {datetime.datetime.fromtimestamp(begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        begin_metadata_file_s3compact = time.time()
+        logger.info(f"--------------Begin _metadata_file in s3compact : {datetime.datetime.fromtimestamp(begin_metadata_file_s3compact).strftime('%H:%M:%S.%f')[:-3]}--------------")
         if revision == 'Latest':
             revision = None
         resp = await self.make_request(
@@ -822,7 +828,7 @@ class S3CompatProvider(provider.BaseProvider):
         )
         await resp.release()
         logger.info(f"--------------End _metadata_file in s3compact : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
-        logger.info(f"--------------Total time _metadata_file in s3compact : {datetime.datetime.fromtimestamp(time.time() - begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        logger.info(f"--------------Total time _metadata_file in s3compact : {datetime.datetime.fromtimestamp(time.time() - begin_metadata_file_s3compact).strftime('%H:%M:%S.%f')[:-3]}--------------")
 
         return S3CompatFileMetadataHeaders(self, path.full_path, resp.headers)
 

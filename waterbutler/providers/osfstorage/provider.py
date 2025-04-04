@@ -208,9 +208,9 @@ class OSFStorageProvider(provider.BaseProvider):
         Finally, WB constructs its metadata response and sends that back to the original request
         issuer.
         """
-        begin = time.time()
+        begin_upload_osfstorage = time.time()
         logger.info(
-            f"--------------Begin upload osfstorage : {datetime.datetime.fromtimestamp(begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
+            f"--------------Begin upload osfstorage : {datetime.datetime.fromtimestamp(begin_upload_osfstorage).strftime('%H:%M:%S.%f')[:-3]}--------------")
         metadata = await self._send_to_storage_provider(stream, path, **kwargs)
         metadata = metadata.serialized()
 
@@ -235,7 +235,7 @@ class OSFStorageProvider(provider.BaseProvider):
         logger.info(
             f"--------------End upload osfstorage : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
         logger.info(
-            f"--------------Total time upload osfstorage : {datetime.datetime.fromtimestamp(time.time() - begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
+            f"--------------Total time upload osfstorage : {datetime.datetime.fromtimestamp(time.time() - begin_upload_osfstorage).strftime('%H:%M:%S.%f')[:-3]}--------------")
 
         return OsfStorageFileMetadata(metadata, str(path)), created
 
@@ -521,9 +521,9 @@ class OSFStorageProvider(provider.BaseProvider):
 
         :return: metadata of the file as it exists on the storage provider
         """
-        begin = time.time()
+        begin_send_to_storage_provider = time.time()
         logger.info(
-            f"--------------Begin _send_to_storage_provider : {datetime.datetime.fromtimestamp(begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
+            f"--------------Begin _send_to_storage_provider : {datetime.datetime.fromtimestamp(begin_send_to_storage_provider).strftime('%H:%M:%S.%f')[:-3]}--------------")
 
         pending_name = str(uuid.uuid4())
         provider = self.make_provider(self.settings)
@@ -585,7 +585,7 @@ class OSFStorageProvider(provider.BaseProvider):
         logger.info(
             f"--------------End _send_to_storage_provider : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
         logger.info(
-            f"--------------Total time _send_to_storage_provider : {datetime.datetime.fromtimestamp(time.time() - begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
+            f"--------------Total time _send_to_storage_provider : {datetime.datetime.fromtimestamp(time.time() - begin_send_to_storage_provider).strftime('%H:%M:%S.%f')[:-3]}--------------")
         return metadata
 
     async def _send_to_metadata_provider(self, stream, path, metadata, **kwargs):
@@ -594,7 +594,7 @@ class OSFStorageProvider(provider.BaseProvider):
 
         :return: metadata of the file and a bool indicating if the file was newly created
         """
-        begin = time.time()
+        begin_send_to_metadata_provider = time.time()
         logger.info(
             f"--------------Begin _send_to_metadata_provider : {datetime.datetime.fromtimestamp(begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
         resp = await self.make_signed_request(
@@ -626,5 +626,5 @@ class OSFStorageProvider(provider.BaseProvider):
         logger.info(
             f"--------------End _send_to_metadata_provider : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
         logger.info(
-            f"--------------Total time _send_to_metadata_provider : {datetime.datetime.fromtimestamp(time.time() - begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
+            f"--------------Total time _send_to_metadata_provider : {datetime.datetime.fromtimestamp(time.time() - begin_send_to_metadata_provider).strftime('%H:%M:%S.%f')[:-3]}--------------")
         return data, created

@@ -46,8 +46,8 @@ class ProviderHandler(core.BaseHandler, CreateMixin, MetadataMixin, MoveCopyMixi
     callback_log = True
 
     async def prepare(self, *args, **kwargs):
-        begin = time.time()
-        logger.info(f"--------------Begin prepare : {datetime.datetime.fromtimestamp(begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        begin_prepare = time.time()
+        logger.info(f"--------------Begin prepare : {datetime.datetime.fromtimestamp(begin_prepare).strftime('%H:%M:%S.%f')[:-3]}--------------")
         method = self.request.method.lower()
 
         # TODO Find a nicer way to handle this
@@ -118,7 +118,7 @@ class ProviderHandler(core.BaseHandler, CreateMixin, MetadataMixin, MoveCopyMixi
         logger.info(
             f"--------------End prepare : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
         logger.info(
-            f"--------------Total time prepare : {datetime.datetime.fromtimestamp(time.time() - begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
+            f"--------------Total time prepare : {datetime.datetime.fromtimestamp(time.time() - begin_prepare).strftime('%H:%M:%S.%f')[:-3]}--------------")
 
     async def head(self, **_):
         """Get metadata for a folder or file
@@ -163,6 +163,10 @@ class ProviderHandler(core.BaseHandler, CreateMixin, MetadataMixin, MoveCopyMixi
         """Sets up an asyncio pipe from client to server
         Only called on PUT when path is to a file
         """
+
+        begin_prepare_stream = time.time()
+        logger.info(
+            f"--------------Begin prepare_stream : {datetime.datetime.fromtimestamp(begin_prepare_stream).strftime('%H:%M:%S.%f')[:-3]}--------------")
         self.rsock, self.wsock = socket.socketpair()
 
         self.reader, _ = await asyncio.open_unix_connection(sock=self.rsock)
@@ -170,6 +174,10 @@ class ProviderHandler(core.BaseHandler, CreateMixin, MetadataMixin, MoveCopyMixi
 
         self.stream = RequestStreamReader(self.request, self.reader)
         self.uploader = asyncio.ensure_future(self.provider.upload(self.stream, self.target_path))
+        logger.info(
+            f"--------------End prepare_stream : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        logger.info(
+            f"--------------Total time prepare_stream : {datetime.datetime.fromtimestamp(time.time() - begin_prepare_stream).strftime('%H:%M:%S.%f')[:-3]}--------------")
 
     def on_finish(self):
         status, method = self.get_status(), self.request.method.upper()

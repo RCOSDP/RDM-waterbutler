@@ -67,8 +67,8 @@ class MoveCopyMixin:
         the "move" provider action that implies that the destination resource, provider, and parent
         path will all be the same as the source.
         """
-        begin = time.time()
-        logger.info(f"--------------Begin move_or_copy : {datetime.datetime.fromtimestamp(begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        begin_move_or_copy = time.time()
+        logger.info(f"--------------Begin move_or_copy : {datetime.datetime.fromtimestamp(begin_move_or_copy).strftime('%H:%M:%S.%f')[:-3]}--------------")
         auth_action = self.json.get('action', 'null')
         if auth_action not in ('copy', 'move', 'rename'):
             raise exceptions.InvalidParameters('Auth action must be "copy", "move", or "rename", '
@@ -191,4 +191,4 @@ class MoveCopyMixin:
         logger.info(
             f"--------------End move_or_copy : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
         logger.info(
-            f"--------------Total time move_or_copy : {datetime.datetime.fromtimestamp(time.time() - begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
+            f"--------------Total time move_or_copy : {datetime.datetime.fromtimestamp(time.time() - begin_move_or_copy).strftime('%H:%M:%S.%f')[:-3]}--------------")

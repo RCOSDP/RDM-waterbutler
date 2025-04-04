@@ -281,8 +281,8 @@ class BaseProvider(metaclass=abc.ABCMeta):
         :raises: :class:`.UnhandledProviderError` Raised if expects is defined
         :raises: :class:`.WaterButlerError` Raised if invalid HTTP method is provided
         """
-        begin = time.time()
-        logger.info(f"--------------Begin make_request : {datetime.datetime.fromtimestamp(begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        begin_make_request = time.time()
+        logger.info(f"--------------Begin make_request : {datetime.datetime.fromtimestamp(begin_make_request).strftime('%H:%M:%S.%f')[:-3]}--------------")
         force_retry_on = kwargs.pop('force_retry_on', set())
         kwargs['headers'] = self.build_headers(**kwargs.get('headers', {}))
         no_auth_header = kwargs.pop('no_auth_header', False)
@@ -355,7 +355,7 @@ class BaseProvider(metaclass=abc.ABCMeta):
                     raise unexpected
                 logger.warning('====End loop make request====')
                 logger.info(f"--------------End make_request : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
-                logger.info(f"--------------Total time make_request : {datetime.datetime.fromtimestamp(time.time() - begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
+                logger.info(f"--------------Total time make_request : {datetime.datetime.fromtimestamp(time.time() - begin_make_request).strftime('%H:%M:%S.%f')[:-3]}--------------")
 
                 return response
             except throws as e:

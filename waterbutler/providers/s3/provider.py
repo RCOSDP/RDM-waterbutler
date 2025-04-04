@@ -183,6 +183,8 @@ class S3Provider(provider.BaseProvider):
         return streams.ResponseStreamReader(resp)
 
     async def upload(self, stream, path, conflict='replace', **kwargs):
+        begin_upload_s3 = time.time()
+        logger.info(f"--------------Begin upload file in s3 : {datetime.datetime.fromtimestamp(begin_upload_s3).strftime('%H:%M:%S.%f')[:-3]}--------------")
         """Uploads the given stream to S3
 
         :param waterbutler.core.streams.RequestWrapper stream: The stream to put to S3
@@ -199,7 +201,13 @@ class S3Provider(provider.BaseProvider):
         else:
             await self._chunked_upload(stream, path)
 
-        return (await self.metadata(path, **kwargs)), not exists
+        data = (await self.metadata(path, **kwargs)), not exists
+
+        logger.info(
+            f"--------------End upload file in s3 : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        logger.info(
+            f"--------------Total time upload file in s3 : {datetime.datetime.fromtimestamp(time.time() - begin_upload_s3).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        return data
 
     async def _contiguous_upload(self, stream, path):
         """Uploads the given stream in one request.
@@ -486,6 +494,9 @@ class S3Provider(provider.BaseProvider):
         :param str path: The path of the key to delete
         :param int confirm_delete: Must be 1 to confirm root folder delete
         """
+        logger.info('----{}:{}::{} from {}:{}::{}'.format(*inspect_info(inspect.currentframe(), inspect.stack())))
+        begin_delete_s3 = time.time()
+        logger.info(f"--------------Begin delete file in s3 : {datetime.datetime.fromtimestamp(begin_delete_s3).strftime('%H:%M:%S.%f')[:-3]}--------------")
         await self._check_region()
 
         if path.is_root:
@@ -505,6 +516,10 @@ class S3Provider(provider.BaseProvider):
             await resp.release()
         else:
             await self._delete_folder(path, **kwargs)
+
+        logger.info(f"--------------End delete file in s3 : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        logger.info(f"--------------Total time delete file in s3 : {datetime.datetime.fromtimestamp(time.time() - begin_delete_s3).strftime('%H:%M:%S.%f')[:-3]}--------------")
+
 
     async def _delete_folder(self, path, **kwargs):
         """Query for recursive contents of folder and delete in batches of 1000
