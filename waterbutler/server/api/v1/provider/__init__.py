@@ -3,6 +3,8 @@ import socket
 import asyncio
 import inspect  # noqa
 import logging
+import datetime
+import time
 from http import HTTPStatus
 
 import tornado.gen
@@ -24,8 +26,6 @@ from waterbutler.server.api.v1.provider.movecopy import MoveCopyMixin
 
 logger = logging.getLogger(__name__)
 auth_handler = AuthHandler(settings.AUTH_HANDLERS)
-import datetime
-import time
 
 
 def list_or_value(value):

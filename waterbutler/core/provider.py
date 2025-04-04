@@ -7,6 +7,8 @@ import logging
 import weakref
 import functools
 import itertools
+import datetime
+import inspect
 from urllib import parse
 
 import furl
@@ -23,15 +25,14 @@ from waterbutler.core.metrics import MetricsRecord
 from waterbutler.core import metadata as wb_metadata
 from waterbutler.core.utils import ZipStreamGenerator
 from waterbutler.core.utils import RequestHandlerContext
+from waterbutler.utils import inspect_info
 
 
 logger = logging.getLogger(__name__)
 _THROTTLES = weakref.WeakKeyDictionary()  # type: weakref.WeakKeyDictionary
 NO_URL_ENCODED_PROVIDERS = ['nextcloud', 'owncloud', 'nextcloudinstitutions']
 QUERY_METHODS = ('GET', 'DELETE')
-import datetime
-import inspect
-from waterbutler.utils import inspect_info
+
 
 def throttle(concurrency=10, interval=1):
     def _throttle(func):
@@ -343,7 +344,6 @@ class BaseProvider(metaclass=abc.ABCMeta):
                 else:
                     raise exceptions.WaterButlerError('Unsupported HTTP method ...')
                 self.provider_metrics.incr('requests.tally.ok')
-                #logger.warning(f'response.content of {method} {non_callable_url} is {response.content}')
                 logger.warning(f'response.status of {method} {non_callable_url} is {response.status}')
                 if (retry > 0 and response.status in force_retry_on) or (expects and response.status not in expects):
                     logger.warning('=======================Retry==============================')

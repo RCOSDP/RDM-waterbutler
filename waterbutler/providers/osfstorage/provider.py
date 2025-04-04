@@ -596,7 +596,7 @@ class OSFStorageProvider(provider.BaseProvider):
         """
         begin_send_to_metadata_provider = time.time()
         logger.info(
-            f"--------------Begin _send_to_metadata_provider : {datetime.datetime.fromtimestamp(begin).strftime('%H:%M:%S.%f')[:-3]}--------------")
+            f"--------------Begin _send_to_metadata_provider : {datetime.datetime.fromtimestamp(begin_send_to_metadata_provider).strftime('%H:%M:%S.%f')[:-3]}--------------")
         resp = await self.make_signed_request(
             'POST',
             self.build_url(path.parent.identifier, 'children'),

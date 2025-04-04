@@ -2,6 +2,8 @@ import os
 import hashlib
 import logging
 import functools
+import datetime
+import time
 from urllib import parse
 
 import xmltodict
@@ -22,6 +24,7 @@ from waterbutler.providers.s3.metadata import (S3Revision,
                                                S3FolderKeyMetadata,
                                                S3FileMetadataHeaders,
                                                )
+from waterbutler.utils import inspect_info
 
 logger = logging.getLogger(__name__)
 

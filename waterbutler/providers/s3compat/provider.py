@@ -638,10 +638,8 @@ class S3CompatProvider(provider.BaseProvider):
             await resp.release()
         else:
             await self._delete_folder(path, **kwargs)
-        
         logger.info(f"--------------End delete file in s3compact : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
         logger.info(f"--------------Total time delete file in s3compact : {datetime.datetime.fromtimestamp(time.time() - begin_delete_s3compact).strftime('%H:%M:%S.%f')[:-3]}--------------")
-
 
     async def _folder_prefix_exists(self, folder_prefix):
         # Even if the storage is MinIO, Contents with a leaf folder is
