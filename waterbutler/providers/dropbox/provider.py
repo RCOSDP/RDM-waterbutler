@@ -1,6 +1,8 @@
 import json
 import typing
 import logging
+import datetime
+import time
 from http import HTTPStatus
 
 from waterbutler.core import provider, streams
@@ -13,6 +15,8 @@ from waterbutler.providers.dropbox.metadata import (DropboxRevision,
                                                     BaseDropboxMetadata,
                                                     DropboxFileMetadata,
                                                     DropboxFolderMetadata, )
+import inspect
+from waterbutler.utils import inspect_info
 
 logger = logging.getLogger(__name__)
 
@@ -282,6 +286,10 @@ class DropboxProvider(provider.BaseProvider):
         """Upload file stream to Dropbox.  If file exceeds `CONTIGUOUS_UPLOAD_SIZE_LIMIT`, Dropbox's
         multipart upload endpoints will be used.
         """
+        logger.info('----{}:{}::{} from {}:{}::{}'.format(*inspect_info(inspect.currentframe(), inspect.stack())))
+        begin_upload_dropbox = time.time()
+        logger.info(f"--------------Begin upload file in dropbox : {datetime.datetime.fromtimestamp(begin_upload_dropbox).strftime('%H:%M:%S.%f')[:-3]}--------------")
+
         path, exists = await self.handle_name_conflict(path, conflict=conflict)
 
         if stream.size > self.CONTIGUOUS_UPLOAD_SIZE_LIMIT:
@@ -289,7 +297,15 @@ class DropboxProvider(provider.BaseProvider):
         else:
             data = await self._contiguous_upload(stream, path, conflict=conflict)
 
-        return DropboxFileMetadata(data, self.folder, self.NAME), not exists
+        logger.info(f"--------------End upload file in dropbox : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        logger.info(f"--------------Total time upload file in dropbox : {datetime.datetime.fromtimestamp(time.time() - begin_upload_dropbox).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        begin_dropbox_file_meta_data = time.time()
+        logger.info(f"--------------Begin DropboxFileMetadata in dropbox : {datetime.datetime.fromtimestamp(begin_dropbox_file_meta_data).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        result = DropboxFileMetadata(data, self.folder, self.NAME), not exists
+        logger.info(f"--------------End DropboxFileMetadata in dropbox : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        logger.info(f"--------------Total time DropboxFileMetadata in dropbox : {datetime.datetime.fromtimestamp(time.time() - begin_dropbox_file_meta_data).strftime('%H:%M:%S.%f')[:-3]}--------------")
+
+        return result
 
     async def _contiguous_upload(self,
                                  stream: streams.BaseStream,
@@ -493,6 +509,9 @@ class DropboxProvider(provider.BaseProvider):
         :param WaterButlerPath path: WaterButlerPath path object for folder
         :param int confirm_delete: Must be 1 to confirm root folder delete
         """
+        begin_delete_dropbox = time.time()
+        logger.info(f"--------------Begin delete file in dropbox : {datetime.datetime.fromtimestamp(begin_delete_dropbox).strftime('%H:%M:%S.%f')[:-3]}--------------")
+
         if path.is_root:
             if confirm_delete == 1:
                 return await self._delete_folder_contents(path)
@@ -506,12 +525,18 @@ class DropboxProvider(provider.BaseProvider):
             {'path': self.folder.rstrip('/') + '/' + path.path.rstrip('/')},
             throws=core_exceptions.DeleteError,
         )
+        logger.info(f"--------------End delete file in dropbox : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        logger.info(f"--------------Total time delete file in dropbox : {datetime.datetime.fromtimestamp(time.time() - begin_delete_dropbox).strftime('%H:%M:%S.%f')[:-3]}--------------")
 
     async def metadata(self,  # type: ignore
                        path: WaterButlerPath,
                        revision: str=None,
                        **kwargs) \
                        -> typing.Union[BaseDropboxMetadata, typing.List[BaseDropboxMetadata]]:
+        logger.info('----{}:{}::{} from {}:{}::{}'.format(*inspect_info(inspect.currentframe(), inspect.stack())))
+        begin_metadata_dropbox = time.time()
+        logger.info(f"--------------Begin metadata in dropbox : {datetime.datetime.fromtimestamp(begin_metadata_dropbox).strftime('%H:%M:%S.%f')[:-3]}--------------")
+
         full_path = path.full_path.rstrip('/')
         url = self.build_url('files', 'get_metadata')
         body = {'path': full_path}
@@ -538,6 +563,8 @@ class DropboxProvider(provider.BaseProvider):
                     url = self.build_url('files', 'list_folder', 'continue')
                     body = {'cursor': data['cursor']}
             self.metrics.add('metadata.folder.pages', page_count)
+            logger.info(f"--------------End metadata in dropbox : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+            logger.info(f"--------------Total time metadata in dropbox : {datetime.datetime.fromtimestamp(time.time() - begin_metadata_dropbox).strftime('%H:%M:%S.%f')[:-3]}--------------")
             return ret
 
         data = await self.dropbox_request(url, body, throws=core_exceptions.MetadataError)
@@ -555,7 +582,13 @@ class DropboxProvider(provider.BaseProvider):
                 code=HTTPStatus.NOT_FOUND,
             )
 
-        return DropboxFileMetadata(data, self.folder, self.NAME)
+        result = DropboxFileMetadata(data, self.folder, self.NAME)
+        logger.info(
+            f"--------------End metadata in dropbox : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        logger.info(
+            f"--------------Total time metadata in dropbox : {datetime.datetime.fromtimestamp(time.time() - begin_metadata_dropbox).strftime('%H:%M:%S.%f')[:-3]}--------------")
+
+        return result
 
     async def revisions(self, path: WaterButlerPath, **kwargs) -> typing.List[DropboxRevision]:
         # Dropbox v2 API limits the number of revisions returned to a maximum

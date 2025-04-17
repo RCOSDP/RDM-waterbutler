@@ -1,5 +1,7 @@
 import logging
 import aiohttp
+import datetime
+import time
 
 from waterbutler.core import streams
 from waterbutler.core import provider
@@ -8,6 +10,9 @@ from waterbutler.core.path import WaterButlerPath
 
 from waterbutler.providers.nextcloud import utils
 from waterbutler.providers.nextcloud.metadata import NextcloudFileRevisionMetadata
+
+import inspect
+from waterbutler.utils import inspect_info
 
 logger = logging.getLogger(__name__)
 
@@ -218,6 +223,9 @@ class NextcloudProvider(provider.BaseProvider):
         :param waterbutler.core.path.WaterButlerPath path: user-supplied path to upload to
         :raises: `waterbutler.core.exceptions.UploadError`
         """
+        begin_upload_nextcloud = time.time()
+        logger.info(f"--------------Begin upload file in nextcloud : {datetime.datetime.fromtimestamp(begin_upload_nextcloud).strftime('%H:%M:%S.%f')[:-3]}--------------")
+
         if path.identifier and conflict == 'keep':
             path, _ = await self.handle_name_conflict(path, conflict=conflict, kind='folder')
             path._parts[-1]._id = None
@@ -233,7 +241,17 @@ class NextcloudProvider(provider.BaseProvider):
             connector=self.connector(),
         )
         await response.release()
+        logger.info(
+            f"--------------End upload file in nextcloud : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        logger.info(
+            f"--------------Total time upload file in nextcloud : {datetime.datetime.fromtimestamp(time.time() - begin_upload_nextcloud).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        begin_nextcloud_file_meta_data = time.time()
+        logger.info(f"--------------Begin metadata in upload nextcloud : {datetime.datetime.fromtimestamp(begin_nextcloud_file_meta_data).strftime('%H:%M:%S.%f')[:-3]}--------------")
+
         meta = await self.metadata(path)
+        logger.info(f"--------------End metadata in upload nextcloud : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        logger.info(f"--------------Total time metadata in upload nextcloud : {datetime.datetime.fromtimestamp(time.time() - begin_nextcloud_file_meta_data).strftime('%H:%M:%S.%f')[:-3]}--------------")
+
         return meta, response.status == 201
 
     async def delete(self, path, **kwargs):
@@ -242,6 +260,9 @@ class NextcloudProvider(provider.BaseProvider):
         :param waterbutler.core.path.WaterButlerPath path: user-supplied path to delete
         :raises: `waterbutler.core.exceptions.DeleteError`
         """
+        begin_delete_nextcloud = time.time()
+        logger.info(f"--------------Begin delete file in nextcloud : {datetime.datetime.fromtimestamp(begin_delete_nextcloud).strftime('%H:%M:%S.%f')[:-3]}--------------")
+
         delete_resp = await self.make_request(
             'DELETE',
             self._webdav_url_ + path.full_path,
@@ -251,6 +272,9 @@ class NextcloudProvider(provider.BaseProvider):
             connector=self.connector(),
         )
         await delete_resp.release()
+        logger.info(f"--------------End delete file in nextcloud : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        logger.info(f"--------------Total time delete file in nextcloud : {datetime.datetime.fromtimestamp(time.time() - begin_delete_nextcloud).strftime('%H:%M:%S.%f')[:-3]}--------------")
+
         return
 
     async def metadata(self, path, **kwargs):
@@ -260,10 +284,24 @@ class NextcloudProvider(provider.BaseProvider):
         :param waterbutler.core.path.WaterButlerPath path: user-supplied path to query
         :raises: `waterbutler.core.exceptions.MetadataError`
         """
+        logger.info('----{}:{}::{} from {}:{}::{}'.format(*inspect_info(inspect.currentframe(), inspect.stack())))
+        begin_metadata_nextcloud = time.time()
+        logger.info(f"--------------Begin metadata in nextcloud : {datetime.datetime.fromtimestamp(begin_metadata_nextcloud).strftime('%H:%M:%S.%f')[:-3]}--------------")
         if path.is_dir:
-            return (await self._metadata_folder(path, **kwargs))
+            data_dir = (await self._metadata_folder(path, **kwargs))
+            logger.info(
+                f"--------------End metadata in nextcloud : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+            logger.info(
+                f"--------------Total time metadata in nextcloud : {datetime.datetime.fromtimestamp(time.time() - begin_metadata_nextcloud).strftime('%H:%M:%S.%f')[:-3]}--------------")
+            return data_dir
         else:
-            return (await self._metadata_file(path, **kwargs))
+            data_file = (await self._metadata_file(path, **kwargs))
+            logger.info(
+                f"--------------End metadata in nextcloud : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+            logger.info(
+                f"--------------Total time metadata in nextcloud : {datetime.datetime.fromtimestamp(time.time() - begin_metadata_nextcloud).strftime('%H:%M:%S.%f')[:-3]}--------------")
+
+            return data_file
 
     async def _metadata_file(self, path, **kwargs):
         items = await self._metadata_folder(path, skip_first=False, **kwargs)

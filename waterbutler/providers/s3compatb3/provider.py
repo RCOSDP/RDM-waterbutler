@@ -20,6 +20,11 @@ from waterbutler.providers.s3compatb3.metadata import S3CompatB3FolderMetadata
 from waterbutler.providers.s3compatb3.metadata import S3CompatB3FolderKeyMetadata
 from waterbutler.providers.s3compatb3.metadata import S3CompatB3FileMetadataHeaders
 
+import datetime
+import time
+import inspect
+from waterbutler.utils import inspect_info
+
 logger = logging.getLogger(__name__)
 
 
@@ -173,6 +178,8 @@ class S3CompatB3Provider(provider.BaseProvider):
 
         :rtype: dict, bool
         """
+        begin_upload_s3compatb3 = time.time()
+        logger.info(f"--------------Begin upload file in s3compatb3 : {datetime.datetime.fromtimestamp(begin_upload_s3compatb3).strftime('%H:%M:%S.%f')[:-3]}--------------")
         path, exists = await self.handle_name_conflict(path, conflict=conflict)
         stream.add_writer('md5', streams.HashStreamWriter(hashlib.md5))
 
@@ -200,7 +207,17 @@ class S3CompatB3Provider(provider.BaseProvider):
         # assert resp.headers['ETag'].replace('"', '') == stream.writers['md5'].hexdigest
 
         await resp.release()
-        return (await self.metadata(path, **kwargs)), not exists
+        logger.info(
+            f"--------------End upload file in s3compatb3 : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        logger.info(
+            f"--------------Total time upload file in s3compatb3 : {datetime.datetime.fromtimestamp(time.time() - begin_upload_s3compatb3).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        begin_s3compatb3_file_meta_data = time.time()
+        logger.info(f"--------------Begin metadata in upload s3compatb3 : {datetime.datetime.fromtimestamp(begin_s3compatb3_file_meta_data).strftime('%H:%M:%S.%f')[:-3]}--------------")
+
+        meta = (await self.metadata(path, **kwargs))
+        logger.info(f"--------------End metadata in upload s3compatb3 : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        logger.info(f"--------------Total time metadata in upload s3compatb3 : {datetime.datetime.fromtimestamp(time.time() - begin_s3compatb3_file_meta_data).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        return meta, not exists
 
     async def delete(self, path, confirm_delete=0, **kwargs):
         """Deletes the key at the specified path
@@ -208,6 +225,8 @@ class S3CompatB3Provider(provider.BaseProvider):
         :param str path: The path of the key to delete
         :param int confirm_delete: Must be 1 to confirm root folder delete
         """
+        begin_delete_s3compatb3 = time.time()
+        logger.info(f"--------------Begin delete file in s3compatb3 : {datetime.datetime.fromtimestamp(begin_delete_s3compatb3).strftime('%H:%M:%S.%f')[:-3]}--------------")
         if path.is_root:
             if not confirm_delete == 1:
                 raise exceptions.DeleteError(
@@ -227,6 +246,8 @@ class S3CompatB3Provider(provider.BaseProvider):
             await resp.release()
         else:
             await self._delete_folder(path, **kwargs)
+        logger.info(f"--------------End delete file in s3compatb3 : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        logger.info(f"--------------Total time delete file in s3compatb3 : {datetime.datetime.fromtimestamp(time.time() - begin_delete_s3compatb3).strftime('%H:%M:%S.%f')[:-3]}--------------")
 
     async def _folder_prefix_exists(self, folder_prefix):
         objects = self.bucket.objects.filter(Prefix=folder_prefix.rstrip('/')).limit(1)
@@ -318,10 +339,22 @@ class S3CompatB3Provider(provider.BaseProvider):
         :param WaterButlerPath path: The path to a key or folder
         :rtype: dict or list
         """
+        logger.info('----{}:{}::{} from {}:{}::{}'.format(*inspect_info(inspect.currentframe(), inspect.stack())))
+        begin_metadata_s3compatb3 = time.time()
+        logger.info(f"--------------Begin metadata in s3compatb3 : {datetime.datetime.fromtimestamp(begin_metadata_s3compatb3).strftime('%H:%M:%S.%f')[:-3]}--------------")
         if path.is_dir:
-            return (await self._metadata_folder(path))
-
-        return (await self._metadata_file(path, revision=revision))
+            data_dir = (await self._metadata_folder(path))
+            logger.info(
+                f"--------------End metadata in s3compatb3 : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+            logger.info(
+                f"--------------Total time metadata in s3compatb3 : {datetime.datetime.fromtimestamp(time.time() - begin_metadata_s3compatb3).strftime('%H:%M:%S.%f')[:-3]}--------------")
+            return data_dir
+        data_file = (await self._metadata_file(path, revision=revision))
+        logger.info(
+            f"--------------End metadata in s3compatb3 : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        logger.info(
+            f"--------------Total time metadata in s3compatb3 : {datetime.datetime.fromtimestamp(time.time() - begin_metadata_s3compatb3).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        return data_file
 
     async def create_folder(self, path, folder_precheck=True, **kwargs):
         """

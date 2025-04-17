@@ -3,6 +3,8 @@ import base64
 import hashlib
 import logging
 import tempfile
+import datetime
+import time
 from asyncio import sleep
 from http import HTTPStatus
 from typing import List, Tuple, Union
@@ -16,6 +18,8 @@ from waterbutler.core.exceptions import RetryChunkedUploadCommit
 from waterbutler.providers.box import settings as pd_settings
 from waterbutler.providers.box.metadata import (BaseBoxMetadata, BoxRevision,
                                                 BoxFileMetadata, BoxFolderMetadata, )
+import inspect
+from waterbutler.utils import inspect_info
 
 logger = logging.getLogger(__name__)
 
@@ -290,6 +294,8 @@ class BoxProvider(provider.BaseProvider):
         a single request.  Otherwise, use Box's chunked upload interface to send it across multiple
         requests.
         """
+        begin_upload_box = time.time()
+        logger.info(f"--------------Begin upload file in box : {datetime.datetime.fromtimestamp(begin_upload_box).strftime('%H:%M:%S.%f')[:-3]}--------------")
 
         if path.identifier and conflict == 'keep':
             path, _ = await self.handle_name_conflict(path, conflict=conflict, kind='folder')
@@ -302,8 +308,18 @@ class BoxProvider(provider.BaseProvider):
 
         created = path.identifier is None
         path._parts[-1]._id = entry['id']
+        logger.info(
+            f"--------------End upload file in box : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        logger.info(
+            f"--------------Total time upload file in box : {datetime.datetime.fromtimestamp(time.time() - begin_upload_box).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        begin_box_file_meta_data = time.time()
+        logger.info(f"--------------Begin BoxFileMetadata in box : {datetime.datetime.fromtimestamp(begin_box_file_meta_data).strftime('%H:%M:%S.%f')[:-3]}--------------")
 
-        return BoxFileMetadata(entry, path), created
+        data = BoxFileMetadata(entry, path), created
+        logger.info(f"--------------End BoxFileMetadata in box : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        logger.info(f"--------------Total time BoxFileMetadata in box : {datetime.datetime.fromtimestamp(time.time() - begin_box_file_meta_data).strftime('%H:%M:%S.%f')[:-3]}--------------")
+
+        return data
 
     async def delete(self,  # type: ignore
                      path: WaterButlerPath, confirm_delete: int=0, **kwargs) -> None:
@@ -312,6 +328,9 @@ class BoxProvider(provider.BaseProvider):
         :param BoxPath path: BoxPath path object for folder
         :param int confirm_delete: Must be 1 to confirm root folder delete
         """
+        begin_delete_box = time.time()
+        logger.info(f"--------------Begin delete file in box : {datetime.datetime.fromtimestamp(begin_delete_box).strftime('%H:%M:%S.%f')[:-3]}--------------")
+
         if not path.identifier:  # TODO This should be abstracted
             raise exceptions.NotFoundError(str(path))
 
@@ -337,18 +356,34 @@ class BoxProvider(provider.BaseProvider):
             throws=exceptions.DeleteError,
         )
         await response.release()
+        logger.info(f"--------------End delete file in box : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        logger.info(f"--------------Total time delete file in box : {datetime.datetime.fromtimestamp(time.time() - begin_delete_box).strftime('%H:%M:%S.%f')[:-3]}--------------")
 
         return  # Ensures the response is properly released
 
     async def metadata(self,  # type: ignore
                        path: WaterButlerPath, raw: bool=False, folder=False, revision=None,
                        **kwargs) -> Union[dict, BoxFileMetadata, List[BoxFolderMetadata]]:
+        logger.info('----{}:{}::{} from {}:{}::{}'.format(*inspect_info(inspect.currentframe(), inspect.stack())))
+        begin_metadata_box = time.time()
+        logger.info(f"--------------Begin metadata in box : {datetime.datetime.fromtimestamp(begin_metadata_box).strftime('%H:%M:%S.%f')[:-3]}--------------")
+
         if path.identifier is None:
             raise exceptions.MetadataError('{} not found'.format(str(path)), code=404)
 
         if path.is_file:
-            return await self._get_file_meta(path, revision=revision, raw=raw)
-        return await self._get_folder_meta(path, raw=raw, folder=folder)
+            data_file = await self._get_file_meta(path, revision=revision, raw=raw)
+            logger.info(f"--------------End metadata in box : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+            logger.info(f"--------------Total time metadata in box : {datetime.datetime.fromtimestamp(time.time() - begin_metadata_box).strftime('%H:%M:%S.%f')[:-3]}--------------")
+            return data_file
+
+        data = await self._get_folder_meta(path, raw=raw, folder=folder)
+
+        logger.info(
+            f"--------------End metadata in box : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        logger.info(
+            f"--------------Total time metadata in box : {datetime.datetime.fromtimestamp(time.time() - begin_metadata_box).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        return data
 
     async def revisions(self, path: WaterButlerPath, **kwargs) -> List[BoxRevision]:
         # from https://developers.box.com/docs/#files-view-versions-of-a-file :

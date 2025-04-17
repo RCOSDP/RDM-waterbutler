@@ -2,6 +2,9 @@ import os
 import json
 import hashlib
 import functools
+import logging
+import datetime
+import time
 from urllib import parse
 from http import HTTPStatus
 from typing import List, Sequence, Tuple, Union
@@ -18,7 +21,10 @@ from waterbutler.providers.googledrive.metadata import (GoogleDriveRevision,
                                                         GoogleDriveFileMetadata,
                                                         GoogleDriveFolderMetadata,
                                                         GoogleDriveFileRevisionMetadata, )
+import inspect
+from waterbutler.utils import inspect_info
 
+logger = logging.getLogger(__name__)
 
 def clean_query(query: str):
     # Replace \ with \\ and ' with \'
@@ -252,6 +258,9 @@ class GoogleDriveProvider(provider.BaseProvider):
                      path: WaterButlerPath,
                      *args,
                      **kwargs) -> Tuple[GoogleDriveFileMetadata, bool]:
+        begin_upload_googledrive = time.time()
+        logger.info(f"--------------Begin upload file in googledrive : {datetime.datetime.fromtimestamp(begin_upload_googledrive).strftime('%H:%M:%S.%f')[:-3]}--------------")
+
         assert path.is_file
 
         if path.identifier:
@@ -271,7 +280,17 @@ class GoogleDriveProvider(provider.BaseProvider):
 
         created = path.identifier is None
         path._parts[-1]._id = data.get('id')
-        return GoogleDriveFileMetadata(data, path), created
+        logger.info(
+            f"--------------End upload file in googledrive : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        logger.info(
+            f"--------------Total time upload file in googledrive : {datetime.datetime.fromtimestamp(time.time() - begin_upload_googledrive).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        begin_googledrive_file_meta_data = time.time()
+        logger.info(f"--------------Begin GoogleDriveFileMetadata in googledrive : {datetime.datetime.fromtimestamp(begin_googledrive_file_meta_data).strftime('%H:%M:%S.%f')[:-3]}--------------")
+
+        result = GoogleDriveFileMetadata(data, path), created
+        logger.info(f"--------------End GoogleDriveFileMetadata in googledrive : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        logger.info(f"--------------Total time GoogleDriveFileMetadata in googledrive : {datetime.datetime.fromtimestamp(time.time() - begin_googledrive_file_meta_data).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        return result
 
     async def delete(self,  # type: ignore
                      path: GoogleDrivePath,
@@ -289,6 +308,9 @@ class GoogleDriveProvider(provider.BaseProvider):
             the contents of provider root path will be deleted. But not the
             provider root itself.
         """
+        begin_delete_googledrive = time.time()
+        logger.info(f"--------------Begin delete file in googledrive : {datetime.datetime.fromtimestamp(begin_delete_googledrive).strftime('%H:%M:%S.%f')[:-3]}--------------")
+
         if not path.identifier:
             raise exceptions.NotFoundError(str(path))
 
@@ -312,6 +334,8 @@ class GoogleDriveProvider(provider.BaseProvider):
             expects=(200, ),
             throws=exceptions.DeleteError,
         )
+        logger.info(f"--------------End delete file in googledrive : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        logger.info(f"--------------Total time delete file in googledrive : {datetime.datetime.fromtimestamp(time.time() - begin_delete_googledrive).strftime('%H:%M:%S.%f')[:-3]}--------------")
         return
 
     def _build_query(self, folder_id: str, title: str=None) -> str:
@@ -331,13 +355,31 @@ class GoogleDriveProvider(provider.BaseProvider):
                        revision=None,
                        **kwargs) -> Union[dict, BaseGoogleDriveMetadata,
                                           List[Union[BaseGoogleDriveMetadata, dict]]]:
+        logger.info('----{}:{}::{} from {}:{}::{}'.format(*inspect_info(inspect.currentframe(), inspect.stack())))
+        begin_metadata_googledrive = time.time()
+        logger.info(f"--------------Begin metadata in googledrive : {datetime.datetime.fromtimestamp(begin_metadata_googledrive).strftime('%H:%M:%S.%f')[:-3]}--------------")
+
         if path.identifier is None:
+            logger.info(f"--------------End metadata in googledrive : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+            logger.info(f"--------------Total time metadata in googledrive : {datetime.datetime.fromtimestamp(time.time() - begin_metadata_googledrive).strftime('%H:%M:%S.%f')[:-3]}--------------")
+
             raise exceptions.MetadataError('{} not found'.format(str(path)), code=404)
 
         if path.is_dir:
-            return await self._folder_metadata(path, raw=raw)
+            data_dir = await self._folder_metadata(path, raw=raw)
+            logger.info(
+                f"--------------End metadata in googledrive : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+            logger.info(
+                f"--------------Total time metadata in googledrive : {datetime.datetime.fromtimestamp(time.time() - begin_metadata_googledrive).strftime('%H:%M:%S.%f')[:-3]}--------------")
+            return data_dir
 
-        return await self._file_metadata(path, revision=revision, raw=raw)
+        data_file = await self._file_metadata(path, revision=revision, raw=raw)
+        logger.info(
+            f"--------------End metadata in googledrive : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        logger.info(
+            f"--------------Total time metadata in googledrive : {datetime.datetime.fromtimestamp(time.time() - begin_metadata_googledrive).strftime('%H:%M:%S.%f')[:-3]}--------------")
+
+        return data_file
 
     async def revisions(self, path: GoogleDrivePath,  # type: ignore
                         **kwargs) -> List[GoogleDriveRevision]:

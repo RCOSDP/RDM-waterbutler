@@ -18,6 +18,11 @@ from waterbutler.providers.onedrive.metadata import (OneDriveFileMetadata,
                                                      OneDriveFolderMetadata,
                                                      OneDriveRevisionMetadata, BaseOneDriveMetadata)
 
+import datetime
+import time
+import inspect
+from waterbutler.utils import inspect_info
+
 logger = logging.getLogger(__name__)
 
 
@@ -234,50 +239,65 @@ class OneDriveProvider(provider.BaseProvider):
         :return: either a OneDriveFileMetada for a single file or an array of either
             `OneDriveFileMetadata` or `OneDriveFolderMetadata` objects
         """
+        logger.info('----{}:{}::{} from {}:{}::{}'.format(*inspect_info(inspect.currentframe(), inspect.stack())))
+        begin_metadata_onedrive = time.time()
+        logger.info(f"--------------Begin metadata in onedrive : {datetime.datetime.fromtimestamp(begin_metadata_onedrive).strftime('%H:%M:%S.%f')[:-3]}--------------")
         logger.debug('metadata identifier::{} path::{}'.format(path.identifier, path))
+        try:
+            if path.api_identifier is None:  # TESTME
+                raise exceptions.NotFoundError(str(path))
 
-        if path.api_identifier is None:  # TESTME
-            raise exceptions.NotFoundError(str(path))
-
-        url = self._build_drive_url(*path.api_identifier, **{'$expand': 'children'})
-        logger.debug("metadata url::{}".format(repr(url)))
-        resp = await self.make_request(
-            'GET',
-            url,
-            expects=(200, ),
-            throws=exceptions.MetadataError
-        )
-        logger.debug("metadata resp::{}".format(repr(resp)))
-        data = await resp.json()
-        logger.debug("metadata data::{}".format(json.dumps(data)))
-
-        if data.get('deleted'):
-            raise exceptions.MetadataError(  # TESTME
-                "Could not retrieve {kind} '{path}'".format(
-                    kind='folder' if data['folder'] else 'file',
-                    path=path,
-                ),
-                code=HTTPStatus.NOT_FOUND,
-            )
-
-        next_url = data.get('children@odata.nextLink', None)
-
-        while next_url is not None:
-            logger.debug("metadata nextLink::{}".format(repr(next_url)))
-            next_resp = await self.make_request(
+            url = self._build_drive_url(*path.api_identifier, **{'$expand': 'children'})
+            logger.debug("metadata url::{}".format(repr(url)))
+            resp = await self.make_request(
                 'GET',
-                next_url,
+                url,
                 expects=(200, ),
                 throws=exceptions.MetadataError
             )
-            logger.debug("metadata next resp::{}".format(repr(next_resp)))
-            next_data = await next_resp.json()
-            logger.debug("metadata next data::{}".format(json.dumps(next_data)))
-            data['children'].extend(next_data['value'])
+            logger.debug("metadata resp::{}".format(repr(resp)))
+            data = await resp.json()
+            logger.debug("metadata data::{}".format(json.dumps(data)))
 
-            next_url = next_data.get('@odata.nextLink', None)
+            if data.get('deleted'):
+                raise exceptions.MetadataError(  # TESTME
+                    "Could not retrieve {kind} '{path}'".format(
+                        kind='folder' if data['folder'] else 'file',
+                        path=path,
+                    ),
+                    code=HTTPStatus.NOT_FOUND,
+                )
 
-        return self._construct_metadata(data, path)
+            next_url = data.get('children@odata.nextLink', None)
+
+            while next_url is not None:
+                logger.debug("metadata nextLink::{}".format(repr(next_url)))
+                next_resp = await self.make_request(
+                    'GET',
+                    next_url,
+                    expects=(200, ),
+                    throws=exceptions.MetadataError
+                )
+                logger.debug("metadata next resp::{}".format(repr(next_resp)))
+                next_data = await next_resp.json()
+                logger.debug("metadata next data::{}".format(json.dumps(next_data)))
+                data['children'].extend(next_data['value'])
+
+                next_url = next_data.get('@odata.nextLink', None)
+            result = self._construct_metadata(data, path)
+            logger.info(
+                f"--------------End metadata in onedrive : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+            logger.info(
+                f"--------------Total time metadata in onedrive : {datetime.datetime.fromtimestamp(time.time() - begin_metadata_onedrive).strftime('%H:%M:%S.%f')[:-3]}--------------")
+
+            return result
+
+        except Exception as e:
+            logger.info(
+                f"--------------End metadata in onedrive : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+            logger.info(
+                f"--------------Total time metadata in onedrive : {datetime.datetime.fromtimestamp(time.time() - begin_metadata_onedrive).strftime('%H:%M:%S.%f')[:-3]}--------------")
+            raise e
 
     async def revisions(self,  # type: ignore
                         path: OneDrivePath,
@@ -532,13 +552,18 @@ class OneDriveProvider(provider.BaseProvider):
         :rtype: (:class:`OneDriveFileMetadata`, :class:`bool`)
         :raises: :class:`waterbutler.core.exceptions.UploadError`
         """
+        begin_upload_onedrive = time.time()
+        logger.info(f"--------------Begin upload file in onedrive : {datetime.datetime.fromtimestamp(begin_upload_onedrive).strftime('%H:%M:%S.%f')[:-3]}--------------")
         logger.debug('upload path::{} stream.size::{}'.format(repr(path), stream.size))
 
         if stream.size == 0:
             metadata = await self._upload_empty_file(path)
         else:
             metadata = await self._resumed_upload(stream, path)
-
+        logger.info(
+            f"--------------End upload file in onedrive : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        logger.info(
+            f"--------------Total time upload file in onedrive : {datetime.datetime.fromtimestamp(time.time() - begin_upload_onedrive).strftime('%H:%M:%S.%f')[:-3]}--------------")
         return metadata, True
 
     async def delete(self,
@@ -554,6 +579,8 @@ class OneDriveProvider(provider.BaseProvider):
         :param kwargs: Ignored
         :raises: :class:`waterbutler.core.exceptions.DeleteError`
         """
+        begin_delete_onedrive = time.time()
+        logger.info(f"--------------Begin delete file in onedrive : {datetime.datetime.fromtimestamp(begin_delete_onedrive).strftime('%H:%M:%S.%f')[:-3]}--------------")
         if not path.identifier:
             raise exceptions.NotFoundError(str(path))
 
@@ -573,6 +600,8 @@ class OneDriveProvider(provider.BaseProvider):
             throws=exceptions.DeleteError
         )
         logger.debug("delete resp::{}".format(repr(resp)))
+        logger.info(f"--------------End delete file in onedrive : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        logger.info(f"--------------Total time delete file in onedrive : {datetime.datetime.fromtimestamp(time.time() - begin_delete_onedrive).strftime('%H:%M:%S.%f')[:-3]}--------------")
 
     # ========== utility methods ==========
 
@@ -676,8 +705,12 @@ class OneDriveProvider(provider.BaseProvider):
         logger.debug('_upload_empty_file resp::{}'.format(repr(resp)))
         data = await resp.json()
         logger.debug('_upload_empty_file data::{}'.format(json.dumps(data)))
-
-        return OneDriveFileMetadata(data, path, self.NAME)
+        begin_onedrive_file_meta_data = time.time()
+        logger.info(f"--------------Begin OneDriveFileMetadata in onedrive : {datetime.datetime.fromtimestamp(begin_onedrive_file_meta_data).strftime('%H:%M:%S.%f')[:-3]}--------------") 
+        data = OneDriveFileMetadata(data, path, self.NAME)
+        logger.info(f"--------------End OneDriveFileMetadata in onedrive : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        logger.info(f"--------------Total time OneDriveFileMetadata in onedrive : {datetime.datetime.fromtimestamp(time.time() - begin_onedrive_file_meta_data).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        return data
 
     async def _resumed_upload(self,
                               stream: streams.BaseStream,
@@ -747,8 +780,12 @@ class OneDriveProvider(provider.BaseProvider):
             start_byte += chunk_size
             if start_byte == all_size:
                 break
-
-        return OneDriveFileMetadata(data, path, self.NAME)
+        begin_onedrive_file_meta_data = time.time()
+        logger.info(f"--------------Begin OneDriveFileMetadata in onedrive : {datetime.datetime.fromtimestamp(begin_onedrive_file_meta_data).strftime('%H:%M:%S.%f')[:-3]}--------------") 
+        result = OneDriveFileMetadata(data, path, self.NAME)
+        logger.info(f"--------------End OneDriveFileMetadata in onedrive : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        logger.info(f"--------------Total time OneDriveFileMetadata in onedrive : {datetime.datetime.fromtimestamp(time.time() - begin_onedrive_file_meta_data).strftime('%H:%M:%S.%f')[:-3]}--------------")
+        return result
 
     async def _wait_for_api_action(self, monitor_url: str, exception: exceptions.WaterButlerError) -> str:
         """Wait for the API Action to finish.
