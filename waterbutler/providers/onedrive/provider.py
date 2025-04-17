@@ -706,7 +706,7 @@ class OneDriveProvider(provider.BaseProvider):
         data = await resp.json()
         logger.debug('_upload_empty_file data::{}'.format(json.dumps(data)))
         begin_onedrive_file_meta_data = time.time()
-        logger.info(f"--------------Begin OneDriveFileMetadata in onedrive : {datetime.datetime.fromtimestamp(begin_onedrive_file_meta_data).strftime('%H:%M:%S.%f')[:-3]}--------------") 
+        logger.info(f"--------------Begin OneDriveFileMetadata in onedrive : {datetime.datetime.fromtimestamp(begin_onedrive_file_meta_data).strftime('%H:%M:%S.%f')[:-3]}--------------")
         data = OneDriveFileMetadata(data, path, self.NAME)
         logger.info(f"--------------End OneDriveFileMetadata in onedrive : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
         logger.info(f"--------------Total time OneDriveFileMetadata in onedrive : {datetime.datetime.fromtimestamp(time.time() - begin_onedrive_file_meta_data).strftime('%H:%M:%S.%f')[:-3]}--------------")
@@ -781,7 +781,7 @@ class OneDriveProvider(provider.BaseProvider):
             if start_byte == all_size:
                 break
         begin_onedrive_file_meta_data = time.time()
-        logger.info(f"--------------Begin OneDriveFileMetadata in onedrive : {datetime.datetime.fromtimestamp(begin_onedrive_file_meta_data).strftime('%H:%M:%S.%f')[:-3]}--------------") 
+        logger.info(f"--------------Begin OneDriveFileMetadata in onedrive : {datetime.datetime.fromtimestamp(begin_onedrive_file_meta_data).strftime('%H:%M:%S.%f')[:-3]}--------------")
         result = OneDriveFileMetadata(data, path, self.NAME)
         logger.info(f"--------------End OneDriveFileMetadata in onedrive : {datetime.datetime.fromtimestamp(time.time()).strftime('%H:%M:%S.%f')[:-3]}--------------")
         logger.info(f"--------------Total time OneDriveFileMetadata in onedrive : {datetime.datetime.fromtimestamp(time.time() - begin_onedrive_file_meta_data).strftime('%H:%M:%S.%f')[:-3]}--------------")

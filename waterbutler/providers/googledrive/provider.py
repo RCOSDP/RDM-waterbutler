@@ -26,6 +26,7 @@ from waterbutler.utils import inspect_info
 
 logger = logging.getLogger(__name__)
 
+
 def clean_query(query: str):
     # Replace \ with \\ and ' with \'
     # Note only single quotes need to be escaped
