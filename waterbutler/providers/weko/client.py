@@ -1,5 +1,5 @@
 import logging
-from typing import Union
+from typing import Union, List
 from typing_extensions import Self
 from waterbutler.core import exceptions
 
@@ -25,10 +25,14 @@ def _is_valid_index(desc):
 
 
 def _is_valid_item(desc):
-    if 'metadata' in desc:
-        return True
-    logger.warning('Unexpected item description: %s', desc)
-    return False
+    if 'metadata' not in desc:
+        logger.warning('Unexpected item description: %s', desc)
+        return False
+    item = Item(desc)
+    if item.title == '':
+        logger.warning('Item without title: %s', desc)
+        return False
+    return True
 
 
 class Client(object):
@@ -186,18 +190,20 @@ class Item(object):
 
     @property
     def primary_title(self) -> str:
-        v = self._metadata['title']
+        v = self._get_metadata_value('title', '')
         if isinstance(v, str):
             return v
-        return v[0]
+        if isinstance(v, list) and len(v) == 1:
+            return v[0]
+        return ''
 
     @property
     def title(self) -> str:
-        return self._metadata['title']
+        return self.primary_title
 
     @property
     def updated(self):
-        return self._metadata['updated']
+        return self._get_metadata_value('updated')
 
     @property
     def _metadata(self):
@@ -205,6 +211,14 @@ class Item(object):
         if '_item_metadata' in metadata:
             return metadata['_item_metadata']
         return metadata
+
+    def _get_metadata_value(self, key: str, default=None) -> Union[str, List[str], None]:
+        metadata = self.raw['metadata']
+        if '_item_metadata' in metadata and key in metadata['_item_metadata']:
+            return metadata['_item_metadata'][key]
+        if key in metadata:
+            return metadata[key]
+        return default
 
     @property
     def files(self):
