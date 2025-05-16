@@ -114,6 +114,14 @@ class S3CompatFolderKeyMetadata(S3CompatMetadata, metadata.BaseFolderMetadata):
     def path(self):
         return '/' + self.raw['Key'].lstrip('/')
 
+    @property
+    def created(self):
+        return self.raw.get('created_at')
+
+    @property
+    def modified(self):
+        return self.raw.get('modified_at')
+
 
 class S3CompatFolderMetadata(S3CompatMetadata, metadata.BaseFolderMetadata):
 
@@ -129,6 +137,14 @@ class S3CompatFolderMetadata(S3CompatMetadata, metadata.BaseFolderMetadata):
     @property
     def path(self):
         return '/' + self.raw['Prefix'].lstrip('/')
+
+    @property
+    def created(self):
+        return self.raw.get('created_at')
+
+    @property
+    def modified(self):
+        return self.raw.get('modified_at')
 
 
 # TODO dates!

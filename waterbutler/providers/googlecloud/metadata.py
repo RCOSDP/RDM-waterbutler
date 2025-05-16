@@ -199,6 +199,14 @@ class GoogleCloudFolderMetadata(BaseGoogleCloudMetadata, metadata.BaseFolderMeta
     def name(self) -> str:
         return os.path.split(self.path.rstrip('/'))[1]
 
+    @property
+    def created(self):
+        return self.raw.get('created_at')
+
+    @property
+    def modified(self):
+        return self.raw.get('modified_at')
+
     @classmethod
     def new_from_resp_headers(cls, obj_name: str,
                               resp_headers: typing.Union[MultiDict, MultiDictProxy]):

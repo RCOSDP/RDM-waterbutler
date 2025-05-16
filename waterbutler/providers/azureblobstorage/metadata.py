@@ -91,3 +91,11 @@ class AzureBlobStorageFolderMetadata(AzureBlobStorageMetadata, metadata.BaseFold
     @property
     def path(self):
         return '/' + self.raw['prefix']
+
+    @property
+    def created(self):
+        return self.raw.get('created_at')
+
+    @property
+    def modified(self):
+        return self.raw.get('modified_at')

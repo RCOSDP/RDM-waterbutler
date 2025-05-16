@@ -31,6 +31,14 @@ class DropboxFolderMetadata(BaseDropboxMetadata, metadata.BaseFolderMetadata):
     def path(self):
         return self.build_path(self.raw['path_display'])
 
+    @property
+    def created(self):
+        return self.raw.get('created_at')
+
+    @property
+    def modified(self):
+        return self.raw.get('modified_at')
+
 
 class DropboxFileMetadata(BaseDropboxMetadata, metadata.BaseFileMetadata):
 

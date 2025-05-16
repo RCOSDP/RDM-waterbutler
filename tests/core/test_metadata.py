@@ -66,6 +66,10 @@ class TestBaseMetadata:
             'size': None,
             'sizeInt': None,
             'resource': 'n0d3z',
+            'created': 'never',
+            'created_utc': '1991-09-25T19:20:30.45+01:00',
+            'modified': 'never',
+            'modified_utc': '1991-09-25T19:20:30.45+01:00'
         }
         assert serialized['links']['new_folder'].endswith(link_suffix + '?kind=folder')
         assert serialized['links']['move'].endswith(link_suffix)
