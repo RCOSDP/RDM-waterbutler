@@ -130,7 +130,11 @@ class TestMetadata:
             'path': '/',
             'provider': 'filesystem',
             'materialized': '/',
-            'etag': '6a2b72b88f67692ff6f4cc3a52798cdc54a6e7c7e6dcbf8463fcb5105b6b949e'
+            'etag': '6a2b72b88f67692ff6f4cc3a52798cdc54a6e7c7e6dcbf8463fcb5105b6b949e',
+            'created': None,
+            'created_utc': None,
+            'modified': None,
+            'modified_utc': None
         }
 
         assert data.json_api_serialized('7ycmyr') == {
@@ -147,6 +151,10 @@ class TestMetadata:
                 'resource': '7ycmyr',
                 'size': None,
                 'sizeInt': None,
+                'created': None,
+                'created_utc': None,
+                'modified': None,
+                'modified_utc': None
             },
             'links': {
                 'move': 'http://localhost:7777/v1/resources/7ycmyr/providers/filesystem/',
@@ -185,7 +193,11 @@ class TestMetadata:
             'path': '/folder1/',
             'provider': 'filesystem',
             'materialized': '/folder1/',
-            'etag': '6a2b72b88f67692ff6f4cc3a52798cdc54a6e7c7e6dcbf8463fcb5105b6b949e'
+            'etag': '6a2b72b88f67692ff6f4cc3a52798cdc54a6e7c7e6dcbf8463fcb5105b6b949e',
+            'created': None,
+            'created_utc': None,
+            'modified': None,
+            'modified_utc': None
         }
 
         assert data.json_api_serialized('7ycmyr') == {
@@ -202,6 +214,10 @@ class TestMetadata:
                 'resource': '7ycmyr',
                 'size': None,
                 'sizeInt': None,
+                'created': None,
+                'created_utc': None,
+                'modified': None,
+                'modified_utc': None
             },
             'links': {
                 'move': 'http://localhost:7777/v1/resources/7ycmyr/providers/filesystem/folder1/',
@@ -240,7 +256,11 @@ class TestMetadata:
             'path': '/folder1/folder2/',
             'provider': 'filesystem',
             'materialized': '/folder1/folder2/',
-            'etag': '6a2b72b88f67692ff6f4cc3a52798cdc54a6e7c7e6dcbf8463fcb5105b6b949e'
+            'etag': '6a2b72b88f67692ff6f4cc3a52798cdc54a6e7c7e6dcbf8463fcb5105b6b949e',
+            'created': None,
+            'created_utc': None,
+            'modified': None,
+            'modified_utc': None
         }
 
         assert data.json_api_serialized('7ycmyr') == {
@@ -256,7 +276,11 @@ class TestMetadata:
                 'etag': '6a2b72b88f67692ff6f4cc3a52798cdc54a6e7c7e6dcbf8463fcb5105b6b949e',
                 'resource': '7ycmyr',
                 'size': None,
-                'sizeInt': None
+                'sizeInt': None,
+                'created': None,
+                'created_utc': None,
+                'modified': None,
+                'modified_utc': None
             },
             'links': {
                 'move': 'http://localhost:7777/v1/resources/7ycmyr/providers/filesystem/'

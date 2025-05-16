@@ -87,6 +87,14 @@ class DataverseDatasetMetadata(BaseDataverseMetadata, metadata.BaseFolderMetadat
     def path(self):
         return self.build_path(self.doi)
 
+    @property
+    def modified(self):
+        return None
+
+    @property
+    def created(self):
+        return None
+
 
 class DataverseRevision(metadata.BaseFileRevisionMetadata):
 

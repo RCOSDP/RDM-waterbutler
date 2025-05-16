@@ -103,7 +103,11 @@ class TestBoxMetadata:
             'path': '/36833297084/',
             'provider': 'box',
             'materialized': '/moveablefolder/',
-            'etag': '299a515e98fe1c548c6fe6141d01a43e739cf965b0d324aa0961924162f7af79'
+            'etag': '299a515e98fe1c548c6fe6141d01a43e739cf965b0d324aa0961924162f7af79',
+            'created': '2017-08-31T08:05:00-07:00',
+            'created_utc': '2017-08-31T15:05:00+00:00',
+            'modified': '2017-08-31T08:05:00-07:00',
+            'modified_utc': '2017-08-31T15:05:00+00:00'
         }
         assert data.json_api_serialized('7ycmyr') == {
             'id': 'box/36833297084/',
@@ -119,6 +123,10 @@ class TestBoxMetadata:
                 'resource': '7ycmyr',
                 'size': None,
                 'sizeInt': None,
+                'created': '2017-08-31T08:05:00-07:00',
+                'created_utc': '2017-08-31T15:05:00+00:00',
+                'modified': '2017-08-31T08:05:00-07:00',
+                'modified_utc': '2017-08-31T15:05:00+00:00'
             },
             'links': {
                 'move': 'http://localhost:7777/v1/resources/7ycmyr/providers/box/36833297084/',

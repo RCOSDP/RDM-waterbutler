@@ -51,6 +51,13 @@ class OwnCloudFileMetadata(BaseOwnCloudMetadata, metadata.BaseFileMetadata):
 
 
 class OwnCloudFolderMetadata(BaseOwnCloudMetadata, metadata.BaseFolderMetadata):
+    @property
+    def created(self):
+        return self.raw.get('created_at')
+
+    @property
+    def modified(self):
+        return self.raw.get('modified_at')
 
     @property
     def content_type(self):

@@ -183,6 +183,10 @@ class WEKOItemMetadata(BaseWEKOMetadata, metadata.BaseFolderMetadata):
         return None
 
     @property
+    def created(self):
+        return None
+
+    @property
     def modified(self):
         return None
 
@@ -268,6 +272,14 @@ class WEKOIndexMetadata(BaseWEKOMetadata, metadata.BaseFolderMetadata):
             },
         }
 
+    @property
+    def created(self):
+        return None
+
+    @property
+    def modified(self):
+        return None
+
 
 class BaseWEKODraftMetadata(BaseWEKOMetadata):
     index_identifier: str = None
@@ -329,6 +341,14 @@ class WEKODraftFolderMetadata(BaseWEKODraftMetadata, metadata.BaseFolderMetadata
             return r
         # Ensure that the return value of create_folder is also interpreted as a folder
         return r + '/'
+
+    @property
+    def created(self):
+        return getattr(self.raw, 'created_at', None)
+
+    @property
+    def modified(self):
+        return getattr(self.raw, 'created_at', None)
 
 
 class WEKODraftFileMetadata(BaseWEKODraftMetadata, metadata.BaseFileMetadata):
