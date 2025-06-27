@@ -436,7 +436,7 @@ class BoxProvider(provider.BaseProvider):
         full_resp = {} if raw else []  # type: ignore
         while page_total is None or page_count < page_total:
             url = self.build_url('folders', path.identifier, 'items',
-                                 fields='id,name,size,modified_at,etag,total_count',
+                                 fields='id,name,size,modified_at,etag,total_count,created_at',
                                  offset=(page_count * limit),
                                  limit=limit)
             response = await self.make_request(
