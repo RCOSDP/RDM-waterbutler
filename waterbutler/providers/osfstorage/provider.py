@@ -225,6 +225,7 @@ class OSFStorageProvider(provider.BaseProvider):
             'checkout': data['data']['checkout'],
             'modified': data['data']['modified'],
             'modified_utc': utils.normalize_datetime(data['data']['modified']),
+            'created_utc': utils.normalize_datetime(data['data']['created']),
         })
 
         path._parts[-1]._id = metadata['path'].strip('/')

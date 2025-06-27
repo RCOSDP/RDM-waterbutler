@@ -653,7 +653,7 @@ class TestDelete:
         root_path = WaterButlerPath('/', _ids=('0'))
 
         url = provider.build_url('folders', root_path.identifier, 'items',
-                                 fields='id,name,size,modified_at,etag,total_count',
+                                 fields='id,name,size,modified_at,etag,total_count,created_at',
                                  offset=(0), limit=1000)
         aiohttpretty.register_json_uri('GET', url,
                                        body=root_provider_fixtures['one_entry_folder_list_metadata'])
@@ -750,7 +750,7 @@ class TestMetadata:
         path = WaterButlerPath('/', _ids=(provider.folder, ))
 
         list_url = provider.build_url('folders', provider.folder, 'items',
-                                      fields='id,name,size,modified_at,etag,total_count',
+                                      fields='id,name,size,modified_at,etag,total_count,created_at',
                                       offset=0, limit=1000)
 
         list_metadata = root_provider_fixtures['folder_list_metadata']
@@ -775,7 +775,7 @@ class TestMetadata:
         path = WaterButlerPath('/', _ids=(provider.folder, ))
 
         list_url = provider.build_url('folders', provider.folder, 'items',
-                                      fields='id,name,size,modified_at,etag,total_count',
+                                      fields='id,name,size,modified_at,etag,total_count,created_at',
                                       offset=0, limit=1000)
 
         aiohttpretty.register_json_uri('GET', list_url, body=item)
@@ -906,7 +906,7 @@ class TestIntraCopy:
 
         file_url = provider.build_url('folders', src_path.identifier, 'copy')
         list_url = provider.build_url('folders', item['id'], 'items',
-                                      fields='id,name,size,modified_at,etag,total_count',
+                                      fields='id,name,size,modified_at,etag,total_count,created_at',
                                       offset=0, limit=1000)
 
         aiohttpretty.register_json_uri('GET', list_url, body=list_metadata)
@@ -936,7 +936,7 @@ class TestIntraCopy:
         file_url = provider.build_url('folders', src_path.identifier, 'copy')
         delete_url = provider.build_url('folders', dest_path.identifier, recursive=True)
         list_url = provider.build_url('folders', item['id'], 'items',
-                                      fields='id,name,size,modified_at,etag,total_count',
+                                      fields='id,name,size,modified_at,etag,total_count,created_at',
                                       offset=0, limit=1000)
 
         aiohttpretty.register_json_uri('GET', list_url, body=list_metadata)
@@ -1002,7 +1002,7 @@ class TestIntraMove:
 
         file_url = provider.build_url('folders', src_path.identifier)
         list_url = provider.build_url('folders', item['id'], 'items',
-                                      fields='id,name,size,modified_at,etag,total_count',
+                                      fields='id,name,size,modified_at,etag,total_count,created_at',
                                       offset=0, limit=1000)
 
         aiohttpretty.register_json_uri('PUT', file_url, body=item)
@@ -1033,7 +1033,7 @@ class TestIntraMove:
         file_url = provider.build_url('folders', src_path.identifier)
         delete_url = provider.build_url('folders', dest_path.identifier, recursive=True)
         list_url = provider.build_url('folders', item['id'], 'items',
-                                      fields='id,name,size,modified_at,etag,total_count',
+                                      fields='id,name,size,modified_at,etag,total_count,created_at',
                                       offset=0, limit=1000)
 
         aiohttpretty.register_json_uri('PUT', file_url, body=item)
