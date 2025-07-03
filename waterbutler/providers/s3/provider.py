@@ -63,7 +63,7 @@ class S3Provider(provider.BaseProvider):
                 credentials['secret_key'], calling_format=OrdinaryCallingFormat())
         self.bucket = self.connection.get_bucket(settings['bucket'], validate=False)
         self.encrypt_uploads = self.settings.get('encrypt_uploads', False)
-        self.region = None
+        self.region = self.settings.get('region', None)
 
     async def validate_v1_path(self, path, **kwargs):
         await self._check_region()
@@ -766,10 +766,10 @@ class S3Provider(provider.BaseProvider):
             if self.region == 'EU':
                 self.region = 'eu-west-1'
 
-            if self.region != '':
-                self.connection.host = self.connection.host.replace('s3.', 's3-' + self.region + '.', 1)
-                self.connection._auth_handler = get_auth_handler(
-                    self.connection.host, boto_config, self.connection.provider, self.connection._required_auth_capability())
+        if self.region != '':
+            self.connection.host = self.connection.host.replace('s3.', 's3-' + self.region + '.', 1)
+            self.connection._auth_handler = get_auth_handler(
+                self.connection.host, boto_config, self.connection.provider, self.connection._required_auth_capability())
 
         self.metrics.add('region', self.region)
 
