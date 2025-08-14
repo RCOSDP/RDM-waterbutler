@@ -116,6 +116,17 @@ def file_metadata_object():
 
 
 @pytest.fixture
+def large_file_metadata_object():
+    content = OrderedDict(Key='my-video.mp4',
+                          LastModified='2009-10-12T17:50:30.000Z',
+                          ETag="fba9dede5f27731c9771645a39863328",
+                          Size='10123321123',
+                          StorageClass='STANDARD')
+
+    return S3FileMetadata(content)
+
+
+@pytest.fixture
 def folder_key_metadata_object():
     content = OrderedDict(Key='naptime/',
                           LastModified='2009-10-12T17:50:30.000Z',
