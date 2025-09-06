@@ -3,7 +3,10 @@ FROM python:3.6-slim-buster
 RUN usermod -d /home www-data && chown www-data:www-data /home
 
 # Install dependancies
-RUN apt-get update \
+# Update sources for Debian Buster (EOL) to use archive
+RUN echo "deb https://archive.debian.org/debian buster main" > /etc/apt/sources.list \
+    && echo "deb https://archive.debian.org/debian-security buster/updates main" >> /etc/apt/sources.list \
+    && apt-get update \
     && apt-get install -y \
         git \
         libevent-dev \
