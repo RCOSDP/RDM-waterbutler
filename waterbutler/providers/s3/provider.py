@@ -35,15 +35,37 @@ def prepare_xml_body(object_dict):
     payload = '<?xml version="1.0" encoding="UTF-8"?>'
     payload += '<Delete>'
     payload += ''.join(
-        '<Object><Key>{}</Key><VersionId>{}</VersionId></Object>'.format(
-            xml.sax.saxutils.escape(key), xml.sax.saxutils.escape(version)
-        )
+        '<Object><Key>{}</Key><VersionId>{}</VersionId></Object>'.format(xml.sax.saxutils.escape(key),
+                                                                         xml.sax.saxutils.escape(version))
         for key, value in object_dict.items()
         for version in value
     )
     payload += '</Delete>'
     payload = payload.encode('utf-8')
     return payload
+
+
+def prepare_xml_body_batches(object_dict, batch_size=1000):
+    """
+    Prepare XML body in batches for delete API calls.
+    :param object_dict: The dictionary of key and version_id
+    :param batch_size: Maximum number of objects per batch
+    :return: A generator yielding XML payloads for each batch
+    """
+    current_batch = []
+    for key, value in object_dict.items():
+        for version in value:
+            current_batch.append(
+                '<Object><Key>{}</Key><VersionId>{}</VersionId></Object>'.format(
+                    xml.sax.saxutils.escape(key), xml.sax.saxutils.escape(version)
+                )
+            )
+            if len(current_batch) >= batch_size:
+                yield '<?xml version="1.0" encoding="UTF-8"?><Delete>{}</Delete>'.format(''.join(current_batch)).encode('utf-8')
+                current_batch = []
+
+    if current_batch:
+        yield '<?xml version="1.0" encoding="UTF-8"?><Delete>{}</Delete>'.format(''.join(current_batch)).encode('utf-8')
 
 
 class S3Provider(provider.BaseProvider):
@@ -516,7 +538,7 @@ class S3Provider(provider.BaseProvider):
                 )
 
         if path.is_file:
-            # Check and delete all versions of the file
+            # Check and delete all versions of the file in batches
             try:
                 prefix = path.full_path.lstrip('/')  # '/' -> '', '/A/B' -> 'A/B'
                 # "versions" in "query_parameters" is required for generate_url().
@@ -526,36 +548,36 @@ class S3Provider(provider.BaseProvider):
                 full_version_list = versions + delete_markers
                 if len(full_version_list) > 0:
                     version_dict = {path.full_path: [version.get('VersionId') for version in full_version_list]}
-                    payload_version = prepare_xml_body(version_dict)
-                    # Delete all versions of each object
-                    md5 = compute_md5(BytesIO(payload_version))
+                    for payload_version in prepare_xml_body_batches(version_dict):
+                        # Delete all versions of each object in batches
+                        md5 = compute_md5(BytesIO(payload_version))
 
-                    query_params = {'delete': ''}
-                    headers = {
-                        'Content-Length': str(len(payload_version)),
-                        'Content-MD5': md5[1],
-                        'Content-Type': 'text/xml',
-                    }
+                        query_params = {'delete': ''}
+                        headers = {
+                            'Content-Length': str(len(payload_version)),
+                            'Content-MD5': md5[1],
+                            'Content-Type': 'text/xml',
+                        }
 
-                    # We depend on a customized version of boto that can make query parameters part of
-                    # the signature.
-                    url = functools.partial(
-                        self.bucket.generate_url,
-                        settings.TEMP_URL_SECS,
-                        'POST',
-                        query_parameters=query_params,
-                        headers=headers,
-                    )
-                    resp = await self.make_request(
-                        'POST',
-                        url,
-                        params=query_params,
-                        data=payload_version,
-                        headers=headers,
-                        expects=(200, 204,),
-                        throws=exceptions.DeleteError,
-                    )
-                    await resp.release()
+                        # We depend on a customized version of boto that can make query parameters part of
+                        # the signature.
+                        url = functools.partial(
+                            self.bucket.generate_url,
+                            settings.TEMP_URL_SECS,
+                            'POST',
+                            query_parameters=query_params,
+                            headers=headers,
+                        )
+                        resp = await self.make_request(
+                            'POST',
+                            url,
+                            params=query_params,
+                            data=payload_version,
+                            headers=headers,
+                            expects=(200, 204,),
+                            throws=exceptions.DeleteError,
+                        )
+                        await resp.release()
 
             except exceptions.MetadataError:
                 # Skip if versions cannot be retrieved
@@ -589,8 +611,12 @@ class S3Provider(provider.BaseProvider):
         objects.  Amazon provides a bulk delete operation to simplify this.
         """
         await self._check_region()
+        if not path.full_path.endswith('/'):
+            raise exceptions.InvalidParameters('not a folder: {}'.format(str(path)))
+
         more_to_come = True
-        query_params = {'prefix': path.path, 'versions': ''}
+        prefix = path.full_path.lstrip('/')  # '/' -> '', '/A/B/' -> 'A/B/'
+        query_params = {'prefix': prefix, 'versions': ''}
         key_marker = None
         version_marker = None
         content_dicts = {}
@@ -668,25 +694,40 @@ class S3Provider(provider.BaseProvider):
         :param query_params: The query parameters to be used in the request
         :return: The dict of response content, list versions and delete_markers
         """
-        resp = await self.make_request(
-            'GET',
-            functools.partial(self.bucket.generate_url, settings.TEMP_URL_SECS, 'GET', query_parameters=query_params),
-            params=query_params,
-            expects=(200,),
-            throws=exceptions.MetadataError,
-        )
+        versions = []
+        delete_markers = []
+        more_to_come = True
 
-        contents = await resp.read()
-        parsed = xmltodict.parse(contents, strip_whitespace=False)['ListVersionsResult']
+        while more_to_come:
+            resp = await self.make_request(
+                'GET',
+                functools.partial(self.bucket.generate_url, settings.TEMP_URL_SECS, 'GET', query_parameters=query_params),
+                params=query_params,
+                expects=(200,),
+                throws=exceptions.MetadataError,
+            )
 
-        # Get both current versions and delete markers
-        versions = parsed.get('Version', [])
-        delete_markers = parsed.get('DeleteMarker', [])
+            contents = await resp.read()
+            parsed = xmltodict.parse(contents, strip_whitespace=False)['ListVersionsResult']
 
-        if isinstance(versions, dict):
-            versions = [versions]
-        if isinstance(delete_markers, dict):
-            delete_markers = [delete_markers]
+            # Append current page's versions and delete markers
+            current_versions = parsed.get('Version', [])
+            current_delete_markers = parsed.get('DeleteMarker', [])
+
+            if isinstance(current_versions, dict):
+                current_versions = [current_versions]
+            if isinstance(current_delete_markers, dict):
+                current_delete_markers = [current_delete_markers]
+
+            versions.extend(current_versions)
+            delete_markers.extend(current_delete_markers)
+
+            # Check if more pages are available
+            more_to_come = parsed.get('IsTruncated') == 'true'
+            if more_to_come:
+                query_params['key-marker'] = parsed.get('NextKeyMarker')
+                query_params['version-id-marker'] = parsed.get('NextVersionIdMarker')
+
         return parsed, versions, delete_markers
 
     async def revisions(self, path, **kwargs):

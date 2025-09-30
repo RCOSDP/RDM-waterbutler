@@ -794,23 +794,40 @@ class S3CompatProvider(provider.BaseProvider):
         :param query_params: The query parameters to be used in the request
         :return: The dict of response content, list versions and delete_markers
         """
-        resp = await self.make_request(
-            'GET',
-            functools.partial(self.bucket.generate_url, settings.TEMP_URL_SECS, 'GET', query_parameters=query_params),
-            params=query_params,
-            expects=(200,),
-            throws=exceptions.MetadataError,
-        )
+        versions = []
+        delete_markers = []
+        more_to_come = True
 
-        contents = await resp.read()
-        parsed = xmltodict.parse(contents, strip_whitespace=False)['ListVersionsResult']
-        versions = parsed.get('Version', [])
-        delete_markers = parsed.get('DeleteMarker', [])
+        while more_to_come:
+            resp = await self.make_request(
+                'GET',
+                functools.partial(self.bucket.generate_url, settings.TEMP_URL_SECS, 'GET', query_parameters=query_params),
+                params=query_params,
+                expects=(200,),
+                throws=exceptions.MetadataError,
+            )
 
-        if isinstance(versions, dict):
-            versions = [versions]
-        if isinstance(delete_markers, dict):
-            delete_markers = [delete_markers]
+            contents = await resp.read()
+            parsed = xmltodict.parse(contents, strip_whitespace=False)['ListVersionsResult']
+
+            # Append current page's versions and delete markers
+            current_versions = parsed.get('Version', [])
+            current_delete_markers = parsed.get('DeleteMarker', [])
+
+            if isinstance(current_versions, dict):
+                current_versions = [current_versions]
+            if isinstance(current_delete_markers, dict):
+                current_delete_markers = [current_delete_markers]
+
+            versions.extend(current_versions)
+            delete_markers.extend(current_delete_markers)
+
+            # Check if more pages are available
+            more_to_come = parsed.get('IsTruncated') == 'true'
+            if more_to_come:
+                query_params['key-marker'] = parsed.get('NextKeyMarker')
+                query_params['version-id-marker'] = parsed.get('NextVersionIdMarker')
+
         return parsed, versions, delete_markers
 
     async def revisions(self, path, **kwargs):
