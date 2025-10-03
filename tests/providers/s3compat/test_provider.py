@@ -1890,31 +1890,27 @@ class TestCRUD:
 
         aiohttpretty.register_uri('GET', versions_url, params=params2, body=list_versions_body2, status=200)
 
-        # Mock delete requests
-        for version_id, file_path in [
-            ('111', 'large-folder/file1.txt'),
-            ('222', 'large-folder/file2.txt')
-        ]:
-            version_ids = {file_path: [version_id]
-                           }
-            payload_xml = prepare_xml_body(version_ids)
-            md5 = compute_md5(BytesIO(payload_xml))
-            headers = {
-                'Content-Length': str(len(payload_xml)),
-                'Content-MD5': md5[1],
-                'Content-Type': 'text/xml',
-            }
+        # Mock single batched delete request for all versions
+        version_ids = {
+            'large-folder/file1.txt': ['111'],
+            'large-folder/file2.txt': ['222']
+        }
+        payload_xml = prepare_xml_body(version_ids)
+        md5 = compute_md5(BytesIO(payload_xml))
+        headers = {
+            'Content-Length': str(len(payload_xml)),
+            'Content-MD5': md5[1],
+            'Content-Type': 'text/xml',
+        }
 
-            query_params = {'delete': ''}
-
-            # Mock delete requests for each version
-            delete_url = provider.bucket.generate_url(
-                100,
-                'POST',
-                query_parameters=query_params,
-                headers=headers
-            )
-            aiohttpretty.register_uri('POST', delete_url, params=query_params, status=200)
+        query_params = {'delete': ''}
+        delete_url = provider.bucket.generate_url(
+            100,
+            'POST',
+            query_parameters=query_params,
+            headers=headers
+        )
+        aiohttpretty.register_uri('POST', delete_url, params=query_params, status=200)
 
         await provider._delete_folder(path)
 
@@ -1922,18 +1918,18 @@ class TestCRUD:
         assert aiohttpretty.has_call(method='GET', uri=versions_url, params=params1)
         assert aiohttpretty.has_call(method='GET', uri=versions_url, params=params2)
 
-        # Verify delete calls were made for each version
+        # Verify single batched delete call was made
         delete_calls = [call for call in aiohttpretty.calls if call['method'] == 'POST']
-        assert len(delete_calls) == 2
+        assert len(delete_calls) == 1
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
     async def test_delete_folder_not_found(self, provider, mock_time):
         path = WaterButlerPath('/not-found-folder/')
-        prefix = path.path.lstrip('/')  # 'not-found-folder/'
+        prefix = path.full_path.lstrip('/')  # 'not-found-folder/'
 
-        # Mock list versions response
-        versions_url = provider.bucket.generate_url(100, 'GET', query_parameters={'versions': ''})
+        # Mock get_full_revision response with empty versions and delete_markers
+        versions_url = provider.bucket.generate_url(100, 'GET', query_parameters={'prefix': prefix, 'versions': ''})
         versions_params = {'prefix': prefix, 'versions': ''}
         list_versions_body = '''<?xml version="1.0" encoding="UTF-8"?>
             <ListVersionsResult>
@@ -1942,26 +1938,11 @@ class TestCRUD:
         aiohttpretty.register_uri('GET', versions_url, params=versions_params,
                                 body=list_versions_body, status=200)
 
-        # Mock folder exists check
-        exists_url = provider.bucket.generate_url(100, 'GET')
-        exists_params = {'prefix': prefix.rstrip('/'), 'delimiter': '/'}
-        exists_body = '''<?xml version="1.0" encoding="UTF-8"?>
-            <ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
-                <Name>bucket</Name>
-                <Prefix>not-found-folder</Prefix>
-                <Marker/>
-                <MaxKeys>1000</MaxKeys>
-                <IsTruncated>false</IsTruncated>
-            </ListBucketResult>'''
-        aiohttpretty.register_uri('GET', exists_url, params=exists_params,
-                                body=exists_body, status=200)
-
         with pytest.raises(exceptions.NotFoundError):
             await provider._delete_folder(path)
 
-        # Verify both requests were made
+        # Verify the request was made
         assert aiohttpretty.has_call(method='GET', uri=versions_url, params=versions_params)
-        assert aiohttpretty.has_call(method='GET', uri=exists_url, params=exists_params)
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty

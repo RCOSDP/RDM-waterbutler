@@ -26,25 +26,6 @@ from waterbutler.providers.s3.metadata import (S3Revision,
 logger = logging.getLogger(__name__)
 
 
-def prepare_xml_body(object_dict):
-    """
-    Prepare xml body for call delete api
-    :param object_dict: The dictionary of key and version_id
-    :return: The xml body base on content of object_dict
-    """
-    payload = '<?xml version="1.0" encoding="UTF-8"?>'
-    payload += '<Delete>'
-    payload += ''.join(
-        '<Object><Key>{}</Key><VersionId>{}</VersionId></Object>'.format(xml.sax.saxutils.escape(key),
-                                                                         xml.sax.saxutils.escape(version))
-        for key, value in object_dict.items()
-        for version in value
-    )
-    payload += '</Delete>'
-    payload = payload.encode('utf-8')
-    return payload
-
-
 def prepare_xml_body_batches(object_dict, batch_size=1000):
     """
     Prepare XML body in batches for delete API calls.
@@ -614,73 +595,46 @@ class S3Provider(provider.BaseProvider):
         if not path.full_path.endswith('/'):
             raise exceptions.InvalidParameters('not a folder: {}'.format(str(path)))
 
-        more_to_come = True
+        # Aggregate ALL versions + delete markers for every key under the prefix using a
+        # single paginated traversal handled by get_full_revision(). Previous implementation
+        # attempted double pagination leading to incomplete deletions (stopping around ~500).
         prefix = path.full_path.lstrip('/')  # '/' -> '', '/A/B/' -> 'A/B/'
-        query_params = {'prefix': prefix, 'versions': ''}
-        key_marker = None
-        version_marker = None
-        content_dicts = {}
-        content_dicts_list = []
-        while more_to_come:
-            content_dicts = {}
-            if key_marker is not None:
-                query_params['key-marker'] = key_marker
-            if version_marker is not None:
-                query_params['version-id-marker'] = version_marker
+        list_query_params = {'prefix': prefix, 'versions': ''}
+        parsed, versions, delete_markers = await self.get_full_revision(dict(list_query_params))
 
-            parsed, versions, delete_markers = await self.get_full_revision(query_params)
-            more_to_come = parsed.get('IsTruncated') == 'true'
-
-            # Get both current versions and delete markers
-            versions = parsed.get('Version', [])
-            delete_markers = parsed.get('DeleteMarker', [])
-
-            if isinstance(versions, dict):
-                versions = [versions]
-            if isinstance(delete_markers, dict):
-                delete_markers = [delete_markers]
-
-            # Process versions and delete markers
-            for version in versions + delete_markers:
-                content_dicts.setdefault(version['Key'], []).append(version.get('VersionId'))
-            if len(content_dicts) > 0:
-                content_dicts_list.append(content_dicts)
-
-            if more_to_come:
-                key_marker = parsed.get('NextKeyMarker')
-                version_marker = parsed.get('NextVersionIdMarker')
-                if not key_marker and not version_marker:
-                    more_to_come = False
-
-        # Query against non-existent folder does not return 404
-        if len(content_dicts) == 0:
+        # If the folder doesn't exist (no keys nor delete markers) raise NotFound
+        if not versions and not delete_markers:
             raise exceptions.NotFoundError(str(path))
-        for content_dicts in content_dicts_list:
-            # Delete all versions of each object
-            payload_version = prepare_xml_body(content_dicts)
-            # Delete new function
-            md5 = compute_md5(BytesIO(payload_version))
 
-            query_params = {'delete': ''}
+        # Build mapping key -> [versionIds]
+        version_map = {}
+        for item in versions + delete_markers:
+            key = item.get('Key')
+            version_id = item.get('VersionId')
+            if not key or not version_id:
+                continue
+            version_map.setdefault(key, []).append(version_id)
+
+        # Execute batched multi-object deletes (<=1000 objects per request)
+        for payload_version in prepare_xml_body_batches(version_map):
+            md5 = compute_md5(BytesIO(payload_version))
+            del_query_params = {'delete': ''}
             headers = {
                 'Content-Length': str(len(payload_version)),
                 'Content-MD5': md5[1],
                 'Content-Type': 'text/xml',
             }
-
-            # We depend on a customized version of boto that can make query parameters part of
-            # the signature.
             url = functools.partial(
                 self.bucket.generate_url,
                 settings.TEMP_URL_SECS,
                 'POST',
-                query_parameters=query_params,
+                query_parameters=del_query_params,
                 headers=headers,
             )
             resp = await self.make_request(
                 'POST',
                 url,
-                params=query_params,
+                params=del_query_params,
                 data=payload_version,
                 headers=headers,
                 expects=(200, 204,),

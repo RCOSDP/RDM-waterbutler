@@ -27,23 +27,28 @@ from waterbutler.providers.s3compat.metadata import (S3CompatRevision,
 logger = logging.getLogger(__name__)
 
 
-def prepare_xml_body(object_dict):
+def prepare_xml_body_batches(object_dict, batch_size=1000):
+    """Generate batched XML payloads for multi-object delete (max 1000 objects per request).
+
+    :param dict object_dict: { key: [versionId, ...], ... }
+    :param int batch_size: number of <Object> entries per batch (<=1000 per AWS spec)
+    :return: yields bytes payloads
     """
-    Prepare xml body for call delete api
-    :param object_dict: The dictionary of key and version_id
-    :return: The xml body base on content of object_dict
-    """
-    payload = '<?xml version="1.0" encoding="UTF-8"?>'
-    payload += '<Delete>'
-    payload += ''.join(
-        '<Object><Key>{}</Key><VersionId>{}</VersionId></Object>'.format(xml.sax.saxutils.escape(key),
-                                                                         xml.sax.saxutils.escape(version))
-        for key, value in object_dict.items()
-        for version in value
-    )
-    payload += '</Delete>'
-    payload = payload.encode('utf-8')
-    return payload
+    current_batch = []
+    for key, versions in object_dict.items():
+        for version in versions:
+            current_batch.append(
+                '<Object><Key>{}</Key><VersionId>{}</VersionId></Object>'.format(
+                    xml.sax.saxutils.escape(key), xml.sax.saxutils.escape(version)
+                )
+            )
+            if len(current_batch) >= batch_size:
+                yield ('<?xml version="1.0" encoding="UTF-8"?><Delete>{}</Delete>'
+                       .format(''.join(current_batch))).encode('utf-8')
+                current_batch = []
+    if current_batch:
+        yield ('<?xml version="1.0" encoding="UTF-8"?><Delete>{}</Delete>'
+               .format(''.join(current_batch))).encode('utf-8')
 
 
 class S3CompatConnection(S3Connection):
@@ -620,47 +625,48 @@ class S3CompatProvider(provider.BaseProvider):
                 )
 
         if path.is_file:
-            # Check and delete all versions of the file
+            # Retrieve and delete all versions (batched) similar to S3 provider
             try:
-                prefix = path.full_path.lstrip('/')  # '/' -> '', '/A/B' -> 'A/B'
-                # "versions" in "query_parameters" is required for generate_url().
-                # SignatureDoesNotMatch is returned when "versions" is not specified.
+                prefix = path.full_path.lstrip('/')
                 query_params = {'prefix': prefix, 'delimiter': '/', 'versions': ''}
                 _, versions, delete_markers = await self.get_full_revision(query_params)
                 full_version_list = versions + delete_markers
-                if len(full_version_list) > 0:
-                    version_dict = {path.full_path: [version.get('VersionId') for version in full_version_list]}
-                    payload_version = prepare_xml_body(version_dict)
-                    # Delete all versions of each object
-                    md5 = compute_md5(BytesIO(payload_version))
-
-                    query_params = {'delete': ''}
-                    headers = {
-                        'Content-Length': str(len(payload_version)),
-                        'Content-MD5': md5[1],
-                        'Content-Type': 'text/xml',
-                    }
-
-                    # We depend on a customized version of boto that can make query parameters part of
-                    # the signature.
-                    url = functools.partial(
-                        self.bucket.generate_url,
-                        settings.TEMP_URL_SECS,
-                        'POST',
-                        query_parameters=query_params,
-                        headers=headers,
-                    )
+                if full_version_list:
+                    version_dict = {path.full_path: [v.get('VersionId') for v in full_version_list if v.get('VersionId')]}
+                    for payload_version in prepare_xml_body_batches(version_dict):
+                        md5 = compute_md5(BytesIO(payload_version))
+                        del_query_params = {'delete': ''}
+                        headers = {
+                            'Content-Length': str(len(payload_version)),
+                            'Content-MD5': md5[1],
+                            'Content-Type': 'text/xml',
+                        }
+                        url = functools.partial(
+                            self.bucket.generate_url,
+                            settings.TEMP_URL_SECS,
+                            'POST',
+                            query_parameters=del_query_params,
+                            headers=headers,
+                        )
+                        resp = await self.make_request(
+                            'POST',
+                            url,
+                            params=del_query_params,
+                            data=payload_version,
+                            headers=headers,
+                            expects=(200, 204,),
+                            throws=exceptions.DeleteError,
+                        )
+                        await resp.release()
+                else:
+                    # No versions -> delete current object directly
                     resp = await self.make_request(
-                        'POST',
-                        url,
-                        params=query_params,
-                        data=payload_version,
-                        headers=headers,
+                        'DELETE',
+                        self.bucket.new_key(path.full_path).generate_url(settings.TEMP_URL_SECS, 'DELETE'),
                         expects=(200, 204,),
                         throws=exceptions.DeleteError,
                     )
                     await resp.release()
-
             except exceptions.MetadataError:
                 # Skip if versions cannot be retrieved
                 # or if the file has no versions
@@ -719,68 +725,49 @@ class S3CompatProvider(provider.BaseProvider):
         if not path.full_path.endswith('/'):
             raise exceptions.InvalidParameters('not a folder: {}'.format(str(path)))
 
-        more_to_come = True
-        prefix = path.full_path.lstrip('/')  # '/' -> '', '/A/B/' -> 'A/B/'
-        query_params = {'prefix': prefix, 'versions': ''}
-        key_marker = None
-        version_marker = None
-        content_dicts = {}
-        content_dicts_list = []
-        while more_to_come:
-            content_dicts = {}
-            if key_marker is not None:
-                query_params['key-marker'] = key_marker
-            if version_marker is not None:
-                query_params['version-id-marker'] = version_marker
-
-            parsed, versions, delete_markers = await self.get_full_revision(query_params)
-            more_to_come = parsed.get('IsTruncated') == 'true'
-            # Process versions and delete markers
-            for version in versions + delete_markers:
-                content_dicts.setdefault(version['Key'], []).append(version.get('VersionId'))
-            if len(content_dicts) > 0:
-                content_dicts_list.append(content_dicts)
-            if more_to_come:
-                key_marker = parsed.get('NextKeyMarker')
-                version_marker = parsed.get('NextVersionIdMarker')
-                if not key_marker and not version_marker:
-                    more_to_come = False
-
-        # Query against non-existent folder does not return 404
-        if len(content_dicts) == 0:
-            # MinIO cannot return Contents with a leaf folder itself.
+        prefix = path.full_path.lstrip('/')
+        list_query_params = {'prefix': prefix, 'versions': ''}
+        try:
+            parsed, versions, delete_markers = await self.get_full_revision(dict(list_query_params))
+        except exceptions.MetadataError:
+            # If versions unsupported, we cannot bulk-delete versions; fall back to NotFound or simple exit
+            # For safety, attempt a basic listing check
             if await self._folder_prefix_exists(prefix):
-                content_dicts = {prefix, None}
-                content_dicts_list.append(content_dicts)
-            else:
-                raise exceptions.NotFoundError(str(path))
+                # Nothing else to delete (no versions support), just return
+                return
+            raise
 
-        for content_dicts in content_dicts_list:
-            # Delete all versions of each object
-            payload_version = prepare_xml_body(content_dicts)
-            # Delete new function
+        if not versions and not delete_markers:
+            # No objects/versions -> treat as missing (parity with S3 provider)
+            raise exceptions.NotFoundError(str(path))
+
+        version_map = {}
+        for item in versions + delete_markers:
+            key = item.get('Key')
+            version_id = item.get('VersionId')
+            if not key or not version_id:
+                continue
+            version_map.setdefault(key, []).append(version_id)
+
+        for payload_version in prepare_xml_body_batches(version_map):
             md5 = compute_md5(BytesIO(payload_version))
-
-            query_params = {'delete': ''}
+            del_query_params = {'delete': ''}
             headers = {
                 'Content-Length': str(len(payload_version)),
                 'Content-MD5': md5[1],
                 'Content-Type': 'text/xml',
             }
-
-            # We depend on a customized version of boto that can make query parameters part of
-            # the signature.
             url = functools.partial(
                 self.bucket.generate_url,
                 settings.TEMP_URL_SECS,
                 'POST',
-                query_parameters=query_params,
+                query_parameters=del_query_params,
                 headers=headers,
             )
             resp = await self.make_request(
                 'POST',
                 url,
-                params=query_params,
+                params=del_query_params,
                 data=payload_version,
                 headers=headers,
                 expects=(200, 204,),
