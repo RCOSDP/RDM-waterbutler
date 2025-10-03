@@ -283,7 +283,7 @@ class TestCopy:
 
         await provider1.copy(provider1, src_path, dest_path)
 
-        provider1.can_intra_copy.assert_called_once_with(provider1, src_path)
+        provider1.can_intra_copy.assert_called_once_with(provider1, src_path, file_size=None)
 
     @pytest.mark.asyncio
     async def test_calls_intra_copy(self, provider1):
@@ -296,7 +296,7 @@ class TestCopy:
         data = await provider1.copy(provider1, src_path, dest_path)
 
         assert data == 'Someratheruniquevalue'
-        provider1.can_intra_copy.assert_called_once_with(provider1, src_path)
+        provider1.can_intra_copy.assert_called_once_with(provider1, src_path, file_size=None)
         provider1.intra_copy.assert_called_once_with(provider1, src_path, dest_path)
 
     @pytest.mark.asyncio
@@ -400,7 +400,7 @@ class TestMove:
 
         await provider1.move(provider1, src_path, dest_path)
 
-        provider1.can_intra_move.assert_called_once_with(provider1, src_path)
+        provider1.can_intra_move.assert_called_once_with(provider1, src_path, file_size=None)
 
     @pytest.mark.asyncio
     async def test_calls_intra_move(self, provider1):
@@ -413,7 +413,7 @@ class TestMove:
         data = await provider1.move(provider1, src_path, dest_path)
 
         assert data == 'Someratheruniquevalue'
-        provider1.can_intra_move.assert_called_once_with(provider1, src_path)
+        provider1.can_intra_move.assert_called_once_with(provider1, src_path, file_size=None)
         provider1.intra_move.assert_called_once_with(provider1, src_path, dest_path)
 
     @pytest.mark.asyncio
