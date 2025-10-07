@@ -12,7 +12,7 @@ from waterbutler.auth.osf import settings
 from waterbutler.utils import inspect_info  # noqa
 from waterbutler.core.auth import AuthType, BaseAuthHandler
 from waterbutler.settings import MFR_IDENTIFYING_HEADER
-
+import json
 
 JWE_KEY = jwe.kdf(settings.JWE_SECRET.encode(), settings.JWE_SALT.encode())
 EXPORT_DATA_FAKE_NODE_ID = 'export_location'
@@ -61,10 +61,20 @@ class OsfAuthHandler(BaseAuthHandler):
                 cookies=cookies,
             ) as response:
                 if response.status != 200:
-                    try:
-                        data = await response.json()
-                    except (ValueError, ContentTypeError):
-                        data = await response.read()
+                    # try:
+                    #     data = await response.json()
+                    # except (ValueError, ContentTypeError):
+                    #     data = await response.read()
+                    data = await response.read()
+                    head = json.dumps(headers)
+                    cookie = json.dumps(cookies)
+                    logger.info('**** AUTH ERROR cookie ****')
+                    logger.info(cookie)
+                    logger.info('**** AUTH ERROR head ****')
+                    logger.info(head)
+                    logger.info('**** AUTH ERROR data ****')
+                    logger.info(data)
+                    logger.info('**** AUTH ERROR ****')
                     raise exceptions.AuthError(data, code=response.status)
 
                 try:
