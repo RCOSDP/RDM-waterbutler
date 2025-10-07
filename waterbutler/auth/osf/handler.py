@@ -72,9 +72,9 @@ class OsfAuthHandler(BaseAuthHandler):
                     # print(cookie)
                     # print('**** AUTH ERROR head ****')
                     # print(head)
-                    logger.info('**** AUTH ERROR data ****')
-                    logger.info(data)
-                    logger.info('**** AUTH ERROR ****')
+                    print('**** AUTH ERROR data ****')
+                    print(data)
+                    print('**** AUTH ERROR ****')
                     raise exceptions.AuthError(data, code=response.status)
 
                 try:
