@@ -10,7 +10,6 @@ import xmltodict
 
 from boto.compat import BytesIO  # type: ignore
 from boto.s3.connection import S3Connection, OrdinaryCallingFormat, NoHostProvided
-from boto.connection import HTTPRequest
 from boto.s3.bucket import Bucket
 from boto.utils import compute_md5
 
@@ -26,6 +25,30 @@ from waterbutler.providers.s3compat.metadata import (S3CompatRevision,
                                                      )
 
 logger = logging.getLogger(__name__)
+
+
+def prepare_xml_body_batches(object_dict, batch_size=1000):
+    """Generate batched XML payloads for multi-object delete (max 1000 objects per request).
+
+    :param dict object_dict: { key: [versionId, ...], ... }
+    :param int batch_size: number of <Object> entries per batch (<=1000 per AWS spec)
+    :return: yields bytes payloads
+    """
+    current_batch = []
+    for key, versions in object_dict.items():
+        for version in versions:
+            current_batch.append(
+                '<Object><Key>{}</Key><VersionId>{}</VersionId></Object>'.format(
+                    xml.sax.saxutils.escape(key), xml.sax.saxutils.escape(version)
+                )
+            )
+            if len(current_batch) >= batch_size:
+                yield ('<?xml version="1.0" encoding="UTF-8"?><Delete>{}</Delete>'
+                       .format(''.join(current_batch))).encode('utf-8')
+                current_batch = []
+    if current_batch:
+        yield ('<?xml version="1.0" encoding="UTF-8"?><Delete>{}</Delete>'
+               .format(''.join(current_batch))).encode('utf-8')
 
 
 class S3CompatConnection(S3Connection):
@@ -46,14 +69,6 @@ class S3CompatConnection(S3Connection):
                 path=path, provider=provider, bucket_class=bucket_class,
                 security_token=security_token, anon=anon,
                 validate_certs=validate_certs, profile_name=profile_name)
-
-    def add_auth(self, method, url, headers):
-        urlo = parse.urlparse(url)
-        self._auth_handler.add_auth(HTTPRequest(method, urlo.scheme,
-                                                urlo.hostname, self.port,
-                                                urlo.path, urlo.path, {},
-                                                headers, ''))
-        return url[:url.index('?')] if '?' in url else url
 
     def _required_auth_capability(self):
         return ['s3']
@@ -256,15 +271,9 @@ class S3CompatProvider(provider.BaseProvider):
         )
 
         headers = {}
-        if self.NAME == 's3compatinstitutions':
-            # Fix S3 Compatible for Institution for downloading data of file's previous version
-            raw_url = url('GET')
-        else:
-            raw_url = self.connection.add_auth('GET', url('GET'), headers)
-
         resp = await self.make_request(
             'GET',
-            raw_url,
+            url,
             range=range,
             headers=headers,
             expects=(200, 206),
@@ -603,7 +612,7 @@ class S3CompatProvider(provider.BaseProvider):
         await resp.release()
 
     async def delete(self, path, confirm_delete=0, **kwargs):
-        """Deletes the key at the specified path
+        """Delete the key and all its versions at the specified path
 
         :param path: ( :class:`.WaterButlerPath` ) The path of the key to delete
         :param int confirm_delete: Must be 1 to confirm root folder delete
@@ -616,13 +625,59 @@ class S3CompatProvider(provider.BaseProvider):
                 )
 
         if path.is_file:
-            resp = await self.make_request(
-                'DELETE',
-                self.bucket.new_key(path.full_path).generate_url(settings.TEMP_URL_SECS, 'DELETE'),
-                expects=(200, 204, ),
-                throws=exceptions.DeleteError,
-            )
-            await resp.release()
+            # Retrieve and delete all versions (batched) similar to S3 provider
+            try:
+                prefix = path.full_path.lstrip('/')
+                query_params = {'prefix': prefix, 'delimiter': '/', 'versions': ''}
+                _, versions, delete_markers = await self.get_full_revision(query_params)
+                full_version_list = versions + delete_markers
+                if full_version_list:
+                    version_dict = {path.full_path: [v.get('VersionId') for v in full_version_list if v.get('VersionId')]}
+                    for payload_version in prepare_xml_body_batches(version_dict):
+                        md5 = compute_md5(BytesIO(payload_version))
+                        del_query_params = {'delete': ''}
+                        headers = {
+                            'Content-Length': str(len(payload_version)),
+                            'Content-MD5': md5[1],
+                            'Content-Type': 'text/xml',
+                        }
+                        url = functools.partial(
+                            self.bucket.generate_url,
+                            settings.TEMP_URL_SECS,
+                            'POST',
+                            query_parameters=del_query_params,
+                            headers=headers,
+                        )
+                        resp = await self.make_request(
+                            'POST',
+                            url,
+                            params=del_query_params,
+                            data=payload_version,
+                            headers=headers,
+                            expects=(200, 204,),
+                            throws=exceptions.DeleteError,
+                        )
+                        await resp.release()
+                else:
+                    # No versions -> delete current object directly
+                    resp = await self.make_request(
+                        'DELETE',
+                        self.bucket.new_key(path.full_path).generate_url(settings.TEMP_URL_SECS, 'DELETE'),
+                        expects=(200, 204,),
+                        throws=exceptions.DeleteError,
+                    )
+                    await resp.release()
+            except exceptions.MetadataError:
+                # Skip if versions cannot be retrieved
+                # or if the file has no versions
+                # In this case, delete the current version directly
+                resp = await self.make_request(
+                    'DELETE',
+                    self.bucket.new_key(path.full_path).generate_url(settings.TEMP_URL_SECS, 'DELETE'),
+                    expects=(200, 204,),
+                    throws=exceptions.DeleteError,
+                )
+                await resp.release()
         else:
             await self._delete_folder(path, **kwargs)
 
@@ -669,52 +724,98 @@ class S3CompatProvider(provider.BaseProvider):
         """
         if not path.full_path.endswith('/'):
             raise exceptions.InvalidParameters('not a folder: {}'.format(str(path)))
+
+        prefix = path.full_path.lstrip('/')
+        list_query_params = {'prefix': prefix, 'versions': ''}
+        try:
+            parsed, versions, delete_markers = await self.get_full_revision(dict(list_query_params))
+        except exceptions.MetadataError:
+            # If versions unsupported, we cannot bulk-delete versions; fall back to NotFound or simple exit
+            # For safety, attempt a basic listing check
+            if await self._folder_prefix_exists(prefix):
+                # Nothing else to delete (no versions support), just return
+                return
+            raise
+
+        if not versions and not delete_markers:
+            # No objects/versions -> treat as missing (parity with S3 provider)
+            raise exceptions.NotFoundError(str(path))
+
+        version_map = {}
+        for item in versions + delete_markers:
+            key = item.get('Key')
+            version_id = item.get('VersionId')
+            if not key or not version_id:
+                continue
+            version_map.setdefault(key, []).append(version_id)
+
+        for payload_version in prepare_xml_body_batches(version_map):
+            md5 = compute_md5(BytesIO(payload_version))
+            del_query_params = {'delete': ''}
+            headers = {
+                'Content-Length': str(len(payload_version)),
+                'Content-MD5': md5[1],
+                'Content-Type': 'text/xml',
+            }
+            url = functools.partial(
+                self.bucket.generate_url,
+                settings.TEMP_URL_SECS,
+                'POST',
+                query_parameters=del_query_params,
+                headers=headers,
+            )
+            resp = await self.make_request(
+                'POST',
+                url,
+                params=del_query_params,
+                data=payload_version,
+                headers=headers,
+                expects=(200, 204,),
+                throws=exceptions.DeleteError,
+            )
+            await resp.release()
+
+    async def get_full_revision(self, query_params):
+        """
+        Get all versions and delete markers of the requested object
+        :param query_params: The query parameters to be used in the request
+        :return: The dict of response content, list versions and delete_markers
+        """
+        versions = []
+        delete_markers = []
         more_to_come = True
-        content_keys = []
-        prefix = path.full_path.lstrip('/')  # '/' -> '', '/A/B/' -> 'A/B/'
-        query_params = {'prefix': prefix}
-        marker = None
 
         while more_to_come:
-            if marker is not None:
-                query_params['marker'] = marker
-
             resp = await self.make_request(
                 'GET',
-                self.bucket.generate_url(settings.TEMP_URL_SECS, 'GET'),
+                functools.partial(self.bucket.generate_url, settings.TEMP_URL_SECS, 'GET', query_parameters=query_params),
                 params=query_params,
-                expects=(200, ),
+                expects=(200,),
                 throws=exceptions.MetadataError,
             )
 
             contents = await resp.read()
-            parsed = xmltodict.parse(contents, strip_whitespace=False)['ListBucketResult']
+            parsed = xmltodict.parse(contents, strip_whitespace=False)['ListVersionsResult']
+
+            # Append current page's versions and delete markers
+            current_versions = parsed.get('Version', [])
+            current_delete_markers = parsed.get('DeleteMarker', [])
+
+            if isinstance(current_versions, dict):
+                current_versions = [current_versions]
+            if isinstance(current_delete_markers, dict):
+                current_delete_markers = [current_delete_markers]
+
+            versions.extend(current_versions)
+            delete_markers.extend(current_delete_markers)
+
+            # Check if more pages are available
             more_to_come = parsed.get('IsTruncated') == 'true'
-            contents = parsed.get('Contents', [])
+            if more_to_come:
+                query_params['key-marker'] = parsed.get('NextKeyMarker')
+                query_params['version-id-marker'] = parsed.get('NextVersionIdMarker')
 
-            if isinstance(contents, dict):
-                contents = [contents]
-
-            content_keys.extend([content['Key'] for content in contents])
-            if len(content_keys) > 0:
-                marker = content_keys[-1]
-
-        # Query against non-existant folder does not return 404
-        if len(content_keys) == 0:
-            # MinIO cannot return Contents with a leaf folder itself.
-            if await self._folder_prefix_exists(prefix):
-                content_keys = [prefix]
-            else:
-                raise exceptions.NotFoundError(str(path))
-
-        for content_key in content_keys[::-1]:
-            resp = await self.make_request(
-                'DELETE',
-                self.bucket.new_key(content_key).generate_url(settings.TEMP_URL_SECS, 'DELETE'),
-                expects=(200, 204, ),
-                throws=exceptions.DeleteError,
-            )
-            await resp.release()
+        return parsed, versions, delete_markers
 
     async def revisions(self, path, **kwargs):
         """Get past versions of the requested key

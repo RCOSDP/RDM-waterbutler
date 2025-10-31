@@ -116,7 +116,7 @@ def file_metadata_object():
 
 @pytest.fixture
 def folder_key_metadata_object():
-    content = OrderedDict(Key='naptime/',
+    content = OrderedDict(Key='naptime/folder/folder1',
                           LastModified='2009-10-12T17:50:30.000Z',
                           ETag='"fba9dede5f27731c9771645a39863328"',
                           Size='0',
@@ -127,7 +127,9 @@ def folder_key_metadata_object():
 
 @pytest.fixture
 def folder_metadata_object():
-    content = OrderedDict(Prefix='photos/')
+    content = OrderedDict(Prefix='photos/',
+                          created_at='2009-10-12T17:50:30.000Z',
+                          updated_at='2009-10-12T17:50:30.000Z')
     return S3CompatFolderMetadata(content)
 
 
@@ -626,6 +628,21 @@ def list_upload_chunks_body(parts_metadata):
     return payload, headers
 
 
+def prepare_xml_body(object_dict):
+    payload = '<?xml version="1.0" encoding="UTF-8"?>'
+    payload += '<Delete>'
+    payload += ''.join(
+        '<Object><Key>{}</Key><VersionId>{}</VersionId></Object>'.format(
+            xml.sax.saxutils.escape(key), xml.sax.saxutils.escape(version)
+        )
+        for key, value in object_dict.items()
+        for version in value
+    )
+    payload += '</Delete>'
+    payload = payload.encode('utf-8')
+    return payload
+
+
 class TestProviderConstruction:
 
     def test_https(self, auth, credentials, settings):
@@ -762,11 +779,14 @@ class TestCRUD:
         head_url = generate_url(100, 'HEAD')
         aiohttpretty.register_uri('HEAD', head_url, headers=file_header_metadata)
 
-        response_headers = {'response-content-disposition': make_disposition(path.name)}
+        response_headers = {'response-content-disposition':
+                            'attachment; filename="muhtriangle"; filename*=UTF-8\'\'muhtriangle'}
         get_url = generate_url(100, response_headers=response_headers)
-        get_url = get_url if provider.NAME == 's3compatinstitutions' else get_url[:get_url.index('?')]
+
         aiohttpretty.register_uri('GET', get_url,
-                                  body=b'delicious', headers=file_header_metadata, auto_length=True)
+                              body=b'delicious',
+                              headers=file_header_metadata,
+                              auto_length=True)
 
         result = await provider.download(path)
         content = await result.read()
@@ -783,9 +803,9 @@ class TestCRUD:
         head_url = generate_url(100, 'HEAD')
         aiohttpretty.register_uri('HEAD', head_url, headers=file_header_metadata)
 
-        response_headers = {'response-content-disposition': make_disposition(path.name)}
+        response_headers = {'response-content-disposition':
+                            'attachment; filename="muhtriangle"; filename*=UTF-8\'\'muhtriangle'}
         get_url = generate_url(100, response_headers=response_headers)
-        get_url = get_url if provider.NAME == 's3compatinstitutions' else get_url[:get_url.index('?')]
         aiohttpretty.register_uri('GET', get_url,
                                   body=b'de', auto_length=True, status=206)
 
@@ -810,9 +830,9 @@ class TestCRUD:
         get_url = generate_url(
             100,
             query_parameters=versionid_parameter,
-            response_headers={'response-content-disposition': make_disposition(path.name)},
+            response_headers = {'response-content-disposition':
+                                'attachment; filename="muhtriangle"; filename*=UTF-8\'\'muhtriangle'}
         )
-        get_url = get_url if provider.NAME == 's3compatinstitutions' else get_url[:get_url.index('?')]
         aiohttpretty.register_uri('GET', get_url,
                                   body=b'delicious', auto_length=True)
 
@@ -836,10 +856,11 @@ class TestCRUD:
         aiohttpretty.register_uri('HEAD', head_url, headers={'Content-Length': '9'})
 
         response_headers = {
-            'response-content-disposition': make_disposition(expected_name)
+            'response-content-disposition': ('attachment; filename="{}"; '
+                                             'filename*=UTF-8\'\'{}').format(expected_name,
+                                                                             expected_name)
         }
         get_url = generate_url(100, response_headers=response_headers)
-        get_url = get_url if provider.NAME == 's3compatinstitutions' else get_url[:get_url.index('?')]
         aiohttpretty.register_uri('GET', get_url,
                                   body=b'delicious', auto_length=True)
 
@@ -857,10 +878,10 @@ class TestCRUD:
         head_url = generate_url(100, 'HEAD')
         aiohttpretty.register_uri('HEAD', head_url, status=404)
 
-        response_headers = {'response-content-disposition': make_disposition(path.name)}
-        get_url = generate_url(100, response_headers=response_headers)
-        get_url = get_url if provider.NAME == 's3compatinstitutions' else get_url[:get_url.index('?')]
-        aiohttpretty.register_uri('GET', get_url, status=404)
+        response_headers = {'response-content-disposition':
+                            'attachment; filename="muhtriangle"; filename*=UTF-8\'\'muhtriangle'}
+        url = generate_url(100, response_headers=response_headers)
+        aiohttpretty.register_uri('GET', url, status=404)
 
         with pytest.raises(exceptions.DownloadError):
             await provider.download(path)
@@ -879,9 +900,9 @@ class TestCRUD:
         no_content_length_metadata = file_header_metadata.copy()
         del no_content_length_metadata['Content-Length']
 
-        response_headers = {'response-content-disposition': make_disposition(path.name)}
+        response_headers = {'response-content-disposition':
+                            'attachment; filename="muhtriangle"; filename*=UTF-8\'\'muhtriangle'}
         get_url = generate_url(100, response_headers=response_headers)
-        get_url = get_url if provider.NAME == 's3compatinstitutions' else get_url[:get_url.index('?')]
         aiohttpretty.register_uri('GET', get_url,
                                   body=b'delicious', headers=no_content_length_metadata)
 
@@ -903,9 +924,9 @@ class TestCRUD:
         head_url = generate_url(100, 'HEAD')
         aiohttpretty.register_uri('HEAD', head_url, headers=head_header_metadata)
 
-        response_headers = {'response-content-disposition': make_disposition(path.name)}
+        response_headers = {'response-content-disposition':
+                            'attachment; filename="muhtriangle"; filename*=UTF-8\'\'muhtriangle'}
         get_url = generate_url(100, response_headers=response_headers)
-        get_url = get_url if provider.NAME == 's3compatinstitutions' else get_url[:get_url.index('?')]
         aiohttpretty.register_uri('GET', get_url,
                                   body=b'delicious', headers=file_header_metadata, auto_length=True)
 
@@ -1119,6 +1140,32 @@ class TestCRUD:
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
+    async def test_chunked_upload_create_upload_session_with_full_path(self, provider,
+                                                                        create_session_resp,
+                                                                        mock_time):
+        path = WaterButlerPath('/foobah', prepend=provider.prefix + 'project_folder/')
+        init_url_full_path = provider.bucket.new_key(path.full_path).generate_url(
+            100,
+            'POST',
+            query_parameters={'uploads': ''}
+        )
+        init_url_path = provider.bucket.new_key(path.path).generate_url(
+            100,
+            'POST',
+            query_parameters={'uploads': ''}
+        )
+
+        aiohttpretty.register_uri('POST', init_url_full_path, body=create_session_resp, status=200)
+        aiohttpretty.register_uri('POST', init_url_path, body=create_session_resp, status=200)
+
+        session_id = await provider._create_upload_session(path)
+
+        assert aiohttpretty.has_call(method='POST', uri=init_url_full_path)
+        assert aiohttpretty.has_call(method='POST', uri=init_url_path) is False
+        assert session_id is not None
+
+    @pytest.mark.asyncio
+    @pytest.mark.aiohttpretty
     async def test_chunked_upload_upload_parts(self, provider, file_stream,
                                                upload_parts_headers_list):
         assert file_stream.size == 6
@@ -1208,6 +1255,50 @@ class TestCRUD:
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
+    async def test_chunked_upload_upload_part_with_full_path(self, provider, file_stream,
+                                              upload_parts_headers_list,
+                                              mock_time):
+        assert file_stream.size == 6
+        provider.CHUNK_SIZE = 2
+
+        path = WaterButlerPath('/foobah', prepend=provider.prefix + 'project_folder/')
+        chunk_number = 1
+        upload_id = 'EXAMPLEJZ6e0YupT2h66iePQCc9IEbYbDUy4RTpMeoSMLPRp8Z5o1u'
+        params = {
+            'partNumber': str(chunk_number),
+            'uploadId': upload_id,
+        }
+        headers = {'Content-Length': str(provider.CHUNK_SIZE)}
+        upload_part_url_full_path = provider.bucket.new_key(path.full_path).generate_url(
+            100,
+            'PUT',
+            query_parameters=params,
+            headers=headers
+        )
+        upload_part_url_path = provider.bucket.new_key(path.path).generate_url(
+            100,
+            'PUT',
+            query_parameters=params,
+            headers=headers
+        )
+        # aiohttp resp headers use upper case
+        part_headers = json.loads(upload_parts_headers_list).get('headers_list')[0]
+        part_headers = {k.upper(): v for k, v in part_headers.items()}
+
+        aiohttpretty.register_uri('PUT', upload_part_url_path, status=200, headers=part_headers)
+        aiohttpretty.register_uri('PUT', upload_part_url_full_path, status=200, headers=part_headers)
+
+        part_metadata = await provider._upload_part(file_stream, path, upload_id, chunk_number,
+                                                    provider.CHUNK_SIZE)
+
+        assert aiohttpretty.has_call(method='PUT', uri=upload_part_url_full_path)
+        assert aiohttpretty.has_call(method='PUT', uri=upload_part_url_path) is False
+        assert part_headers == part_metadata
+
+        provider.CHUNK_SIZE = pd_settings.CHUNK_SIZE
+
+    @pytest.mark.asyncio
+    @pytest.mark.aiohttpretty
     async def test_chunked_upload_complete_multipart_upload(self, provider,
                                                             upload_parts_headers_list,
                                                             complete_upload_resp, mock_time):
@@ -1251,6 +1342,65 @@ class TestCRUD:
         await provider._complete_multipart_upload(path, upload_id, headers_list)
 
         assert aiohttpretty.has_call(method='POST', uri=complete_url, params=params)
+
+    @pytest.mark.asyncio
+    @pytest.mark.aiohttpretty
+    async def test_chunked_upload_complete_multipart_upload_with_full_path(self, provider,
+                                                            upload_parts_headers_list,
+                                                            complete_upload_resp, mock_time):
+        path = WaterButlerPath('/foobah', prepend=provider.prefix + 'project_folder/')
+        upload_id = 'EXAMPLEJZ6e0YupT2h66iePQCc9IEbYbDUy4RTpMeoSMLPRp8Z5o1u' \
+                    '8feSRonpvnWsKKG35tI2LB9VDPiCgTy.Gq2VxQLYjrue4Nq.NBdqI-'
+        params = {'uploadId': upload_id}
+        payload = '<?xml version="1.0" encoding="UTF-8"?>'
+        payload += '<CompleteMultipartUpload>'
+        # aiohttp resp headers are upper case
+        headers_list = json.loads(upload_parts_headers_list).get('headers_list')
+        headers_list = [{k.upper(): v for k, v in headers.items()} for headers in headers_list]
+        for i, part in enumerate(headers_list):
+            payload += '<Part>'
+            payload += '<PartNumber>{}</PartNumber>'.format(i+1)  # part number must be >= 1
+            payload += '<ETag>{}</ETag>'.format(xml.sax.saxutils.escape(part['ETAG']))
+            payload += '</Part>'
+        payload += '</CompleteMultipartUpload>'
+        payload = payload.encode('utf-8')
+
+        headers = {
+            'Content-Length': str(len(payload)),
+            'Content-MD5': compute_md5(BytesIO(payload))[1],
+            'Content-Type': 'text/xml',
+        }
+
+        complete_url_full_path = provider.bucket.new_key(path.full_path).generate_url(
+            100,
+            'POST',
+            headers=headers,
+            query_parameters=params
+        )
+        complete_url_path = provider.bucket.new_key(path.path).generate_url(
+            100,
+            'POST',
+            headers=headers,
+            query_parameters=params
+        )
+
+        aiohttpretty.register_uri(
+            'POST',
+            complete_url_full_path,
+            status=200,
+            body=complete_upload_resp
+        )
+        aiohttpretty.register_uri(
+            'POST',
+            complete_url_path,
+            status=200,
+            body=complete_upload_resp
+        )
+
+        await provider._complete_multipart_upload(path, upload_id, headers_list)
+
+        assert aiohttpretty.has_call(method='POST', uri=complete_url_full_path, params=params)
+        assert aiohttpretty.has_call(method='POST', uri=complete_url_path, params=params) is False
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
@@ -1403,6 +1553,46 @@ class TestCRUD:
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
+    async def test_abort_chunked_upload_with_full_path(self, provider, list_parts_resp_empty,
+                                                   mock_time):
+        path = WaterButlerPath('/foobah', prepend=provider.prefix + 'project_folder/')
+        upload_id = 'EXAMPLEJZ6e0YupT2h66iePQCc9IEbYbDUy4RTpMeoSMLPRp8Z5o1u' \
+                    '8feSRonpvnWsKKG35tI2LB9VDPiCgTy.Gq2VxQLYjrue4Nq.NBdqI-'
+        abort_url_full_path = provider.bucket.new_key(path.full_path).generate_url(
+            100,
+            'DELETE',
+            query_parameters={'uploadId': upload_id}
+        )
+        abort_url_path = provider.bucket.new_key(path.path).generate_url(
+            100,
+            'DELETE',
+            query_parameters={'uploadId': upload_id}
+        )
+        list_url_full_path = provider.bucket.new_key(path.full_path).generate_url(
+            100,
+            'GET',
+            query_parameters={'uploadId': upload_id}
+        )
+        list_url_path = provider.bucket.new_key(path.path).generate_url(
+            100,
+            'GET',
+            query_parameters={'uploadId': upload_id}
+        )
+        aiohttpretty.register_uri('DELETE', abort_url_full_path, status=204)
+        aiohttpretty.register_uri('GET', list_url_full_path, body=list_parts_resp_empty, status=200)
+        aiohttpretty.register_uri('DELETE', abort_url_path, status=204)
+        aiohttpretty.register_uri('GET', list_url_path, body=list_parts_resp_empty, status=200)
+
+        aborted = await provider._abort_chunked_upload(path, upload_id)
+
+        assert aiohttpretty.has_call(method='DELETE', uri=abort_url_full_path)
+        assert aiohttpretty.has_call(method='GET', uri=list_url_full_path)
+        assert aiohttpretty.has_call(method='DELETE', uri=abort_url_path) is False
+        assert aiohttpretty.has_call(method='GET', uri=list_url_path) is False
+        assert aborted is True
+
+    @pytest.mark.asyncio
+    @pytest.mark.aiohttpretty
     async def test_list_uploaded_chunks_session_not_found(self,
                                                           provider,
                                                           generic_http_404_resp,
@@ -1469,115 +1659,340 @@ class TestCRUD:
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
-    async def test_delete(self, provider, mock_time):
-        path = WaterButlerPath('/some-file', prepend=provider.prefix)
-        url = provider.bucket.new_key(path.full_path).generate_url(100, 'DELETE')
-        aiohttpretty.register_uri('DELETE', url, status=200)
+    async def test_list_uploaded_chunks_with_full_path(self,
+                                                   provider,
+                                                   list_parts_resp_empty,
+                                                   mock_time):
+        path = WaterButlerPath('/foobah', prepend=provider.prefix + 'project_folder/')
+        upload_id = 'EXAMPLEJZ6e0YupT2h66iePQCc9IEbYbDUy4RTpMeoSMLPRp8Z5o1u' \
+                    '8feSRonpvnWsKKG35tI2LB9VDPiCgTy.Gq2VxQLYjrue4Nq.NBdqI-'
+        list_url_full_path = provider.bucket.new_key(path.full_path).generate_url(
+            100,
+            'GET',
+            query_parameters={'uploadId': upload_id}
+        )
+        list_url_path = provider.bucket.new_key(path.path).generate_url(
+            100,
+            'GET',
+            query_parameters={'uploadId': upload_id}
+        )
+        aiohttpretty.register_uri('GET', list_url_full_path, body=list_parts_resp_empty, status=200)
+        aiohttpretty.register_uri('GET', list_url_path, body=list_parts_resp_empty, status=200)
 
-        await provider.delete(path)
+        resp_xml, session_deleted = await provider._list_uploaded_chunks(path, upload_id)
 
-        assert aiohttpretty.has_call(method='DELETE', uri=url)
+        assert aiohttpretty.has_call(method='GET', uri=list_url_full_path)
+        assert aiohttpretty.has_call(method='GET', uri=list_url_path) is False
+        assert resp_xml is not None
+        assert session_deleted is False
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
-    async def test_delete_confirm_delete(self, provider, folder_and_contents, mock_time):
-        path = WaterButlerPath('/', prepend=provider.prefix)
+    async def test_delete(self, provider, mock_time):
+        path = WaterButlerPath('/some-file', prepend=provider.prefix)
 
-        params = {'prefix': path.full_path.lstrip('/')}
-        query_url = provider.bucket.generate_url(100, 'GET')
+        # Mock the versions list response
+        versions_url = provider.bucket.generate_url(100, 'GET', query_parameters={'versions': ''})
+        params = {
+            'prefix': path.path.lstrip('/'),  # Remove leading slash
+            'delimiter': '/',
+            'versions': ''  # Add versions parameter
+        }
+        version_body = '''<?xml version="1.0" encoding="UTF-8"?>
+            <ListVersionsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01">
+                <Name>bucket</Name>
+                <Prefix>some-file</Prefix>
+                <KeyMarker/>
+                <VersionIdMarker/>
+                <MaxKeys>1000</MaxKeys>
+                <IsTruncated>false</IsTruncated>
+                <Version>
+                    <Key>some-file</Key>
+                    <VersionId>null</VersionId>
+                    <IsLatest>true</IsLatest>
+                    <LastModified>2023-01-01T00:00:00.000Z</LastModified>
+                    <ETag>&quot;d41d8cd98f00b204e9800998ecf8427e&quot;</ETag>
+                    <Size>0</Size>
+                    <Owner>
+                        <ID>minio</ID>
+                        <DisplayName>minio</DisplayName>
+                    </Owner>
+                    <StorageClass>STANDARD</StorageClass>
+                </Version>
+            </ListVersionsResult>'''
+        aiohttpretty.register_uri('GET', versions_url, params=params, status=200, body=version_body)
+
+        # Mock the delete response for version
+        version_ids = {'some-file': ['null']}
+        payload_xml = prepare_xml_body(version_ids)
+        md5 = compute_md5(BytesIO(payload_xml))
+        headers = {
+            'Content-Length': str(len(payload_xml)),
+            'Content-MD5': md5[1],
+            'Content-Type': 'text/xml',
+        }
+
+        query_params = {'delete': ''}
+        # We depend on a customized version of boto that can make query parameters part of
+        # the signature.
+        delete_version_url = provider.bucket.generate_url(
+            100,
+            'POST',
+            query_parameters=query_params,
+            headers=headers
+        )
+        aiohttpretty.register_uri('POST', delete_version_url, params=query_params, status=200)
+        await provider.delete(path)
+
+        assert aiohttpretty.has_call(method='GET', uri=versions_url, params=params)
+        assert aiohttpretty.has_call(method='POST', uri=delete_version_url)
+
+    @pytest.mark.asyncio
+    @pytest.mark.aiohttpretty
+    async def test_delete_confirm_delete(self, provider, version_metadata, mock_time):
+        path = WaterButlerPath('/')
+
+        # Mock request GET versions
+        versions_url = provider.bucket.generate_url(100, 'GET', query_parameters={'versions': ''})
+        params = {'prefix': '', 'versions': ''}
         aiohttpretty.register_uri(
             'GET',
-            query_url,
+            versions_url,
             params=params,
-            body=folder_and_contents,
-            status=200,
+            body=version_metadata,
+            status=200
         )
 
-        target_items = ['thisfolder/', 'thisfolder/item1', 'thisfolder/item2']
-        delete_urls = []
-        prefix = provider.prefix
-        if prefix is None:
-            prefix = ''
-        for i in target_items:
-            delete_url = provider.bucket.new_key(prefix + i).generate_url(
-                100,
-                'DELETE',
-            )
-            delete_urls.append(delete_url)
-            aiohttpretty.register_uri('DELETE', delete_url, status=204)
+        # Mock delete calls for each version ID from version_metadata
+        version_ids = {'my-image.jpg': [
+            '3/L4kqtJl40Nr8X8gdRQBpUMLUo',
+            'QUpfdndhfd8438MNFDN93jdnJFkdmqnh893',
+            'UIORUnfndfhnw89493jJFJ'
+        ]}
+        payload_xml = prepare_xml_body(version_ids)
+        md5 = compute_md5(BytesIO(payload_xml))
+        headers = {
+            'Content-Length': str(len(payload_xml)),
+            'Content-MD5': md5[1],
+            'Content-Type': 'text/xml',
+        }
 
+        query_params = {'delete': ''}
+        # We depend on a customized version of boto that can make query parameters part of
+        # the signature.
+        delete_url = provider.bucket.generate_url(
+            100,
+            'POST',
+            query_parameters=query_params,
+            headers=headers
+        )
+        aiohttpretty.register_uri('POST', delete_url, params=query_params, status=200)
         with pytest.raises(exceptions.DeleteError):
             await provider.delete(path)
 
         await provider.delete(path, confirm_delete=1)
 
-        assert aiohttpretty.has_call(method='GET', uri=query_url, params=params)
-        for delete_url in delete_urls:
-            assert aiohttpretty.has_call(method='DELETE', uri=delete_url)
+        delete_calls = [call for call in aiohttpretty.calls if call['method'] == 'POST']
+        assert len(delete_calls) == 1
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
-    async def test_folder_delete(self, provider, folder_and_contents, mock_time):
-        path = WaterButlerPath('/some-folder/', prepend=provider.prefix)
+    async def test_delete_folder_with_versions(self, provider, mock_time):
+        path = WaterButlerPath('/folder-to-delete/')
 
-        params = {'prefix': path.full_path.lstrip('/')}
-        query_url = provider.bucket.generate_url(100, 'GET')
-        aiohttpretty.register_uri(
-            'GET',
-            query_url,
-            params=params,
-            body=folder_and_contents,
-            status=200,
-        )
+        # Mock list versions response
+        versions_url = provider.bucket.generate_url(100, 'GET', query_parameters={'versions': ''})
+        params = {'prefix': path.path, 'versions': ''}
 
-        target_items = ['thisfolder/', 'thisfolder/item1', 'thisfolder/item2']
-        delete_urls = []
-        prefix = provider.prefix
-        if prefix is None:
-            prefix = ''
-        for i in target_items:
-            delete_url = provider.bucket.new_key(prefix + i).generate_url(
-                100,
-                'DELETE',
-            )
-            delete_urls.append(delete_url)
-            aiohttpretty.register_uri('DELETE', delete_url, status=204)
+        list_versions_body = '''<?xml version="1.0" encoding="UTF-8"?>
+            <ListVersionsResult>
+                <Version>
+                    <Key>folder-to-delete/file1.txt</Key>
+                    <VersionId>111</VersionId>
+                </Version>
+                <Version>
+                    <Key>folder-to-delete/file1.txt</Key>
+                    <VersionId>222</VersionId>
+                </Version>
+                <DeleteMarker>
+                    <Key>folder-to-delete/file2.txt</Key>
+                    <VersionId>333</VersionId>
+                </DeleteMarker>
+            </ListVersionsResult>'''
 
-        await provider.delete(path)
+        aiohttpretty.register_uri('GET', versions_url, params=params, body=list_versions_body, status=200)
 
-        assert aiohttpretty.has_call(method='GET', uri=query_url, params=params)
-        for delete_url in delete_urls:
-            assert aiohttpretty.has_call(method='DELETE', uri=delete_url)
+        # Mock delete requests for each version
+        version_ids = {'folder-to-delete/file1.txt': ['111', '222'],
+                       'folder-to-delete/file2.txt': ['333']}
+        payload_xml = prepare_xml_body(version_ids)
+        md5 = compute_md5(BytesIO(payload_xml))
+        headers = {
+            'Content-Length': str(len(payload_xml)),
+            'Content-MD5': md5[1],
+            'Content-Type': 'text/xml',
+        }
 
-    @pytest.mark.asyncio
-    @pytest.mark.aiohttpretty
-    async def test_single_item_folder_delete(self, provider, folder_single_item_metadata, mock_time):
-        path = WaterButlerPath('/single-thing-folder/', prepend=provider.prefix)
+        query_params = {'delete': ''}
 
-        params = {'prefix': path.full_path.lstrip('/')}
-        query_url = provider.bucket.generate_url(100, 'GET')
-        aiohttpretty.register_uri(
-            'GET',
-            query_url,
-            params=params,
-            body=folder_single_item_metadata,
-            status=200,
-        )
-
-        prefix = 'my-image.jpg'
-        delete_url = provider.bucket.new_key(prefix).generate_url(
+        # Mock delete requests for each version
+        delete_url = provider.bucket.generate_url(
             100,
-            'DELETE',
+            'POST',
+            query_parameters=query_params,
+            headers=headers
         )
-        aiohttpretty.register_uri('DELETE', delete_url, status=204)
+        aiohttpretty.register_uri('POST', delete_url, params=query_params, status=200)
+        await provider._delete_folder(path)
 
-        await provider.delete(path)
+        # Verify list versions request was made
+        assert aiohttpretty.has_call(method='GET', uri=versions_url, params=params)
 
-        assert aiohttpretty.has_call(method='GET', uri=query_url, params=params)
-        assert aiohttpretty.has_call(method='DELETE', uri=delete_url)
-        (payload, headers) = bulk_delete_body(
-            ['my-image.jpg']
+        # Verify delete calls were made for each version
+        delete_calls = [call for call in aiohttpretty.calls if call['method'] == 'POST']
+        assert len(delete_calls) == 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.aiohttpretty
+    async def test_delete_folder_truncated_response(self, provider, mock_time):
+        path = WaterButlerPath('/large-folder/')
+
+        # Mock first list versions response (truncated)
+        versions_url = provider.bucket.generate_url(100, 'GET', query_parameters={'versions': ''})
+        params1 = {'prefix': path.path, 'versions': ''}
+
+        list_versions_body1 = '''<?xml version="1.0" encoding="UTF-8"?>
+            <ListVersionsResult>
+                <IsTruncated>true</IsTruncated>
+                <NextKeyMarker>large-folder/file2.txt</NextKeyMarker>
+                <NextVersionIdMarker>222</NextVersionIdMarker>
+                <Version>
+                    <Key>large-folder/file1.txt</Key>
+                    <VersionId>111</VersionId>
+                </Version>
+            </ListVersionsResult>'''
+
+        aiohttpretty.register_uri('GET', versions_url, params=params1, body=list_versions_body1, status=200)
+
+        # Mock second list versions response
+        params2 = {
+            'prefix': path.path,
+            'versions': '',
+            'key-marker': 'large-folder/file2.txt',
+            'version-id-marker': '222'
+        }
+
+        list_versions_body2 = '''<?xml version="1.0" encoding="UTF-8"?>
+            <ListVersionsResult>
+                <IsTruncated>false</IsTruncated>
+                <Version>
+                    <Key>large-folder/file2.txt</Key>
+                    <VersionId>222</VersionId>
+                </Version>
+            </ListVersionsResult>'''
+
+        aiohttpretty.register_uri('GET', versions_url, params=params2, body=list_versions_body2, status=200)
+
+        # Mock single batched delete request for all versions
+        version_ids = {
+            'large-folder/file1.txt': ['111'],
+            'large-folder/file2.txt': ['222']
+        }
+        payload_xml = prepare_xml_body(version_ids)
+        md5 = compute_md5(BytesIO(payload_xml))
+        headers = {
+            'Content-Length': str(len(payload_xml)),
+            'Content-MD5': md5[1],
+            'Content-Type': 'text/xml',
+        }
+
+        query_params = {'delete': ''}
+        delete_url = provider.bucket.generate_url(
+            100,
+            'POST',
+            query_parameters=query_params,
+            headers=headers
         )
+        aiohttpretty.register_uri('POST', delete_url, params=query_params, status=200)
+
+        await provider._delete_folder(path)
+
+        # Verify both list versions requests were made
+        assert aiohttpretty.has_call(method='GET', uri=versions_url, params=params1)
+        assert aiohttpretty.has_call(method='GET', uri=versions_url, params=params2)
+
+        # Verify single batched delete call was made
+        delete_calls = [call for call in aiohttpretty.calls if call['method'] == 'POST']
+        assert len(delete_calls) == 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.aiohttpretty
+    async def test_delete_folder_not_found(self, provider, mock_time):
+        path = WaterButlerPath('/not-found-folder/')
+        prefix = path.full_path.lstrip('/')  # 'not-found-folder/'
+
+        # Mock get_full_revision response with empty versions and delete_markers
+        versions_url = provider.bucket.generate_url(100, 'GET', query_parameters={'prefix': prefix, 'versions': ''})
+        versions_params = {'prefix': prefix, 'versions': ''}
+        list_versions_body = '''<?xml version="1.0" encoding="UTF-8"?>
+            <ListVersionsResult>
+                <IsTruncated>false</IsTruncated>
+            </ListVersionsResult>'''
+        aiohttpretty.register_uri('GET', versions_url, params=versions_params,
+                                body=list_versions_body, status=200)
+
+        with pytest.raises(exceptions.NotFoundError):
+            await provider._delete_folder(path)
+
+        # Verify the request was made
+        assert aiohttpretty.has_call(method='GET', uri=versions_url, params=versions_params)
+
+    @pytest.mark.asyncio
+    @pytest.mark.aiohttpretty
+    async def test_delete_folder_delete_error(self, provider, mock_time):
+        path = WaterButlerPath('/error-folder/')
+
+        # Mock list versions response
+        versions_url = provider.bucket.generate_url(100, 'GET', query_parameters={'versions': ''})
+        params = {'prefix': path.path, 'versions': ''}
+
+        list_versions_body = '''<?xml version="1.0" encoding="UTF-8"?>
+            <ListVersionsResult>
+                <Version>
+                    <Key>error-folder/file1.txt</Key>
+                    <VersionId>111</VersionId>
+                </Version>
+            </ListVersionsResult>'''
+
+        aiohttpretty.register_uri('GET', versions_url, params=params, body=list_versions_body, status=200)
+
+        # Mock failed delete request
+        version_ids = {'error-folder/file1.txt': ['111']}
+        payload_xml = prepare_xml_body(version_ids)
+        md5 = compute_md5(BytesIO(payload_xml))
+        headers = {
+            'Content-Length': str(len(payload_xml)),
+            'Content-MD5': md5[1],
+            'Content-Type': 'text/xml',
+        }
+
+        query_params = {'delete': ''}
+
+        # Mock delete requests for each version
+        delete_url = provider.bucket.generate_url(
+            100,
+            'POST',
+            query_parameters=query_params,
+            headers=headers
+        )
+        aiohttpretty.register_uri('POST', delete_url, params=query_params, status=403)
+
+        with pytest.raises(exceptions.DeleteError):
+            await provider._delete_folder(path)
+
+        # Verify both requests were made
+        assert aiohttpretty.has_call(method='GET', uri=versions_url, params=params)
+        assert aiohttpretty.has_call(method='POST', uri=delete_url)
 
 
 class TestMetadata:

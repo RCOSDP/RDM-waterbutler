@@ -52,6 +52,14 @@ class IQBRIMSFolderMetadata(BaseIQBRIMSMetadata, metadata.BaseFolderMetadata):
     def export_name(self):
         return self.name
 
+    @property
+    def created(self):
+        return self.raw.get('created_at')
+
+    @property
+    def modified(self):
+        return self.raw.get('modified_at')
+
 
 class IQBRIMSFileMetadata(BaseIQBRIMSMetadata, metadata.BaseFileMetadata):
     """The metadata for a single file on IQB-RIMS.  This class expects a the ``raw``

@@ -148,6 +148,10 @@ class FigshareFolderMetadata(BaseFigshareMetadata, metadata.BaseFolderMetadata):
         return None
 
     @property
+    def created(self):
+        return self.raw['created_date']
+
+    @property
     def modified(self):
         return self.raw['modified_date']
 

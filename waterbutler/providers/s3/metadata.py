@@ -102,6 +102,14 @@ class S3FolderKeyMetadata(S3Metadata, metadata.BaseFolderMetadata):
         return self.raw['Key'].split('/')[-2]
 
     @property
+    def created(self):
+        return None
+
+    @property
+    def modified(self):
+        return self.raw.get('modified_at')
+
+    @property
     def path(self):
         return '/' + self.raw['Key']
 
@@ -115,6 +123,14 @@ class S3FolderMetadata(S3Metadata, metadata.BaseFolderMetadata):
     @property
     def path(self):
         return '/' + self.raw['Prefix']
+
+    @property
+    def created(self):
+        return self.raw.get('created_at')
+
+    @property
+    def modified(self):
+        return self.raw.get('modified_at')
 
 
 # TODO dates!

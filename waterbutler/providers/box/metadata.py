@@ -26,6 +26,14 @@ class BoxFolderMetadata(BaseBoxMetadata, metadata.BaseFolderMetadata):
     def path(self):
         return '/{}/'.format(self.raw['id'])
 
+    @property
+    def created(self):
+        return self.raw.get('created_at')
+
+    @property
+    def modified(self):
+        return self.raw.get('modified_at')
+
 
 class BoxFileMetadata(BaseBoxMetadata, metadata.BaseFileMetadata):
 

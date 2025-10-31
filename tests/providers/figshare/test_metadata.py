@@ -173,7 +173,11 @@ class TestFigshareFileMetadata:
             'path': '/8269766/',
             'provider': 'figshare',
             'materialized': '/DatasetPrivate/',
-            'etag': 'd7dc67b05e9c50c8adefabc9e2ff2cfaabad26913e8c9916396f067216941389'
+            'etag': 'd7dc67b05e9c50c8adefabc9e2ff2cfaabad26913e8c9916396f067216941389',
+            'created': '2019-06-13T15:58:25Z',
+            'created_utc': None,
+            'modified': '2019-06-13T16:00:12Z',
+            'modified_utc': '2019-06-13T16:00:12+00:00'
         }
 
         api_url = 'http://localhost:7777/v1/resources/45hjnz/providers/figshare/8269766/'
@@ -195,6 +199,10 @@ class TestFigshareFileMetadata:
                 'resource': '45hjnz',
                 'size': None,
                 'sizeInt': None,
+                'created': '2019-06-13T15:58:25Z',
+                'created_utc': None,
+                'modified': '2019-06-13T16:00:12Z',
+                'modified_utc': '2019-06-13T16:00:12+00:00'
             },
             'links': {
                 'move': api_url,

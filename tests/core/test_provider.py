@@ -5,7 +5,6 @@ from unittest import mock
 from waterbutler.core import metadata
 from waterbutler.core import exceptions
 
-
 @pytest.fixture
 def provider1():
     return utils.MockProvider1({'user': 'name'}, {'pass': 'word'}, {})
