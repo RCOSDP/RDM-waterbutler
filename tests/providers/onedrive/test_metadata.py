@@ -27,6 +27,9 @@ class TestOneDriveMetadata:
             'id': root_provider_fixtures['file_id'],
             'etag': 'aRjRENTBFNDAwREZFN0Q0RSEyOTEuMg',
             'webView': 'https://1drv.ms/t/s!AE59_g1ADtX0giM',
+            "hashes": {
+                "sha1Hash": "D6FAC576DCF80198874C9C9476F021AF3F12688C"
+            },
         }
         assert metadata.name == 'toes.txt'
         assert metadata.path == '/{}'.format(root_provider_fixtures['file_id'])
@@ -78,7 +81,7 @@ class TestOneDriveMetadata:
         metadata = OneDriveRevisionMetadata(revision_fixtures['file_revisions']['value'][0])
 
         assert metadata.serialized() == {
-            'extra': {},
+            'extra': {'size': 12},
             'version': 'current',
             'modified': '2017-11-30T15:42:33.447Z',
             'modified_utc': '2017-11-30T15:42:33+00:00',

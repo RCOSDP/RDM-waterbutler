@@ -16,6 +16,7 @@ from boto.utils import compute_md5
 
 from waterbutler.core import streams, metadata, exceptions
 from waterbutler.core.path import WaterButlerPath
+from waterbutler.core.utils import make_disposition
 from waterbutler.providers.s3compat import S3CompatProvider
 from waterbutler.providers.s3compat import settings as pd_settings
 
@@ -835,7 +836,7 @@ class TestCRUD:
         aiohttpretty.register_uri('GET', get_url,
                                   body=b'delicious', auto_length=True)
 
-        result = await provider.download(path, version='someversion')
+        result = await provider.download(path, revision='someversion')
         content = await result.read()
 
         assert content == b'delicious'
