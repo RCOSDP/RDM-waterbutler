@@ -7,14 +7,16 @@ from waterbutler.providers.dropboxbusiness import DropboxBusinessProvider
 def settings():
     return {'folder': '/Photos',
             'admin_dbmid': 'dbmid:dummy',
-            'team_folder_id': '1234567890'}
+            'team_folder_id': '1234567890',
+            'team_folder_name': 'team_folder_name'}
 
 
 @pytest.fixture
 def settings_root():
     return {'folder': '/',
             'admin_dbmid': 'dbmid:dummy',
-            'team_folder_id': '1234567890'}
+            'team_folder_id': '1234567890',
+            'team_folder_name': 'team_folder_name'}
 
 
 @pytest.fixture
