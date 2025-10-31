@@ -181,10 +181,14 @@ class DropboxProvider(provider.BaseProvider):
                     throws=core_exceptions.IntraCopyError,
                 )
             else:
+                headers = {}
+                if self.NAME == 'dropboxbusiness':
+                    headers = {'Dropbox-API-Select-Admin': None, 'Dropbox-API-Select-User': self.admin_dbmid}
                 from_ref_data = await self.dropbox_request(
                     self.build_url('files', 'copy_reference', 'get'),
                     {'path': src_path.full_path.rstrip('/')},
                     throws=core_exceptions.IntraCopyError,
+                    headers=headers,
                 )
                 from_ref = from_ref_data['copy_reference']
 
@@ -193,6 +197,7 @@ class DropboxProvider(provider.BaseProvider):
                     {'copy_reference': from_ref, 'path': dest_path.full_path.rstrip('/')},
                     expects=(200, 201, 409),
                     throws=core_exceptions.IntraCopyError,
+                    headers=headers,
                 )
             data = data['metadata']
         except pd_exceptions.DropboxNamingConflictError:

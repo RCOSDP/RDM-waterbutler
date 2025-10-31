@@ -6,6 +6,7 @@ import xmltodict
 
 import boto3
 from botocore.exceptions import ClientError
+from urllib.parse import unquote_plus
 # from boto3 import exception
 
 from waterbutler.core import streams
@@ -296,7 +297,7 @@ class S3CompatB3Provider(provider.BaseProvider):
         except exceptions.MetadataError as e:
             # MinIO may not support "versions" from generate_url() of boto2.
             # (And, MinIO does not support ListObjectVersions yet.)
-            logger.info('ListObjectVersions may not be supported: url={}: {}'.format(url(), str(e)))
+            logger.info('ListObjectVersions may not be supported: url={}: {}'.format(url, str(e)))
             return []
 
         content = await resp.read()
@@ -309,7 +310,7 @@ class S3CompatB3Provider(provider.BaseProvider):
         return [
             S3CompatB3Revision(item)
             for item in versions
-            if item['Key'] == prefix
+            if unquote_plus(item['Key']) == prefix  # Fix oraclecloud.com return special encoded 'Key' value ('/' -> '%2F', ' ' -> '+' instead of '%20')
         ]
 
     async def metadata(self, path, revision=None, **kwargs):
@@ -319,9 +320,18 @@ class S3CompatB3Provider(provider.BaseProvider):
         :rtype: dict or list
         """
         if path.is_dir:
+            if 'next_token' in kwargs:
+                return await self._metadata_folder(path, kwargs['next_token'])
             return (await self._metadata_folder(path))
 
         return (await self._metadata_file(path, revision=revision))
+
+    def handle_data(self, data):
+        token = None
+        if not isinstance(data, S3CompatB3FileMetadataHeaders):
+            token = data.pop()
+
+        return data, token or ''
 
     async def create_folder(self, path, folder_precheck=True, **kwargs):
         """
@@ -337,20 +347,31 @@ class S3CompatB3Provider(provider.BaseProvider):
         return S3CompatB3FolderMetadata(self, {'Prefix': path.full_path})
 
     async def _metadata_file(self, path, revision=None):
-        if revision is None or revision == 'Latest':
-            revision = 'null'
         try:
-            resp = self.connection.s3.meta.client.head_object(Bucket=self.bucket.name, Key=path.full_path)
+            # Fix OCI for Institutions: get metadata of previous file version
+            if not revision or revision == 'Latest':
+                resp = self.connection.s3.meta.client.head_object(Bucket=self.bucket.name, Key=path.full_path)
+            else:
+                resp = self.connection.s3.meta.client.head_object(Bucket=self.bucket.name, Key=path.full_path, VersionId=revision)
         except ClientError as e:
             raise exceptions.MetadataError(str(path.full_path), code=int(e.response['Error']['Code']))
 
         return S3CompatB3FileMetadataHeaders(self, path.full_path, resp)
 
-    async def _metadata_folder(self, path):
+    async def _metadata_folder(self, path, next_token=None):
         logger.info('_metadata_folder: {}:'.format(path.full_path))
         prefix = path.full_path.lstrip('/')  # '/' -> '', '/A/B' -> 'A/B'
+        req_kwargs = {
+            'Bucket': self.bucket.name,
+            'Prefix': prefix,
+            'Delimiter': '/',
+            'MaxKeys': 1000,
+        }
+        if next_token is not None:
+            req_kwargs['ContinuationToken'] = next_token
 
-        resp = self.connection.s3.meta.client.list_objects_v2(Bucket=self.bucket.name, Prefix=prefix, Delimiter='/')
+        resp = self.connection.s3.meta.client.list_objects_v2(**req_kwargs)
+        next_token_string = resp.get('NextContinuationToken', '')
         contents = resp.get('Contents', [])
         prefixes = resp.get('CommonPrefixes', [])
 
@@ -374,5 +395,8 @@ class S3CompatB3Provider(provider.BaseProvider):
             else:
                 logger.info('_metadata_folder: file: ---')
                 items.append(S3CompatB3FileMetadata(self, content))
+
+        if next_token_string:
+            items.append(next_token_string)
 
         return items
