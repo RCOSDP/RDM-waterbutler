@@ -29,6 +29,7 @@ logger = logging.getLogger(__name__)
 _THROTTLES = weakref.WeakKeyDictionary()  # type: weakref.WeakKeyDictionary
 NO_URL_ENCODED_PROVIDERS = ['nextcloud', 'owncloud', 'nextcloudinstitutions']
 QUERY_METHODS = ('GET', 'DELETE')
+SUPPORT_INTRA = ['s3', 's3compat']
 
 
 def throttle(concurrency=10, interval=1):
@@ -398,7 +399,13 @@ class BaseProvider(metaclass=abc.ABCMeta):
             raise exceptions.OverwriteSelfError(src_path)
 
         self.provider_metrics.add('move.can_intra_move', False)
-        if self.can_intra_move(dest_provider, src_path, file_size=file_size):
+        can_intra_move = False
+        if self.NAME in SUPPORT_INTRA:
+            can_intra_move = self.can_intra_move(dest_provider, src_path, file_size=file_size)
+        else:
+            can_intra_move = self.can_intra_move(dest_provider, src_path)
+
+        if can_intra_move:
             self.provider_metrics.add('move.can_intra_move', True)
             return await self.intra_move(*args)
 
@@ -449,7 +456,12 @@ class BaseProvider(metaclass=abc.ABCMeta):
             raise exceptions.OverwriteSelfError(src_path)
 
         self.provider_metrics.add('copy.can_intra_copy', False)
-        if self.can_intra_copy(dest_provider, src_path, file_size=file_size):
+        can_intra_copy = False
+        if self.NAME in SUPPORT_INTRA:
+            can_intra_copy = self.can_intra_copy(dest_provider, src_path, file_size=file_size)
+        else:
+            can_intra_copy = self.can_intra_copy(dest_provider, src_path)
+        if can_intra_copy:
             self.provider_metrics.add('copy.can_intra_copy', True)
             return await self.intra_copy(*args)
 
