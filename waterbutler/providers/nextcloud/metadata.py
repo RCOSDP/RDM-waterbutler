@@ -20,7 +20,14 @@ class BaseNextcloudMetadata(metadata.BaseMetadata):
 
     @property
     def path(self):
-        path = self._href[len(self._folder) - 1:]
+        folder = self._folder
+        href = self._href
+
+        folder_name = folder.strip('/')
+        if folder_name not in href:
+            folder_name_of_href = href.split('/')[1]
+            href = href.replace(folder_name_of_href, folder_name)
+        path = href[len(folder) - 1:]
         return path
 
     @property
