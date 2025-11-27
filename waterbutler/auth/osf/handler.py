@@ -46,13 +46,15 @@ class OsfAuthHandler(BaseAuthHandler):
 
         # Note: `aiohttp3` uses `yarl` which only supports string parameters
         query_params['payload'] = raw_payload.decode("utf-8")
-
+        logger.info(f'Time building payload: {datetime.datetime.now()}')
         return query_params
 
-    async def make_request(self, params, headers, cookies):
+    async def make_request(self, params, headers, cookies, request=None):
         try:
             # Note: with simple request whose response is handled right afterwards without "being passed
             #       further along", use the context manager so WB doesn't need to handle the sessions.
+            before_time = datetime.datetime.now()
+            logger.info(f'Starting request {request} at time: {before_time}')
             async with aiohttp.request(
                 'get',
                 settings.API_URL,
@@ -60,6 +62,8 @@ class OsfAuthHandler(BaseAuthHandler):
                 headers=headers,
                 cookies=cookies,
             ) as response:
+                logger.info(f'Time received response for request {request}: {datetime.datetime.now()}')
+                logger.info(f'Total time for request {request}: {(datetime.datetime.now() - before_time).total_seconds()} seconds')
                 if response.status != 200:
                     try:
                         data = await response.json()
@@ -68,11 +72,15 @@ class OsfAuthHandler(BaseAuthHandler):
                     raise exceptions.AuthError(data, code=response.status)
 
                 try:
+                    logger.info(f'Time decoding JWT request {request}: {datetime.datetime.now()}')
                     raw = await response.json()
                     signed_jwt = jwe.decrypt(raw['payload'].encode(), JWE_KEY)
                     data = jwt.decode(signed_jwt, settings.JWT_SECRET,
                                       algorithm=settings.JWT_ALGORITHM,
                                       options={'require_exp': True})
+                    logger.info(f'Time decoded JWT request {request}: {datetime.datetime.now()}')
+                    after_time = datetime.datetime.now()
+                    logger.info(f'Time decoding request {request} took {(after_time - before_time).total_seconds()} seconds')
                     return data['data']
                 except (jwt.InvalidTokenError, KeyError):
                     raise exceptions.AuthError(data, code=response.status)
@@ -174,7 +182,7 @@ class OsfAuthHandler(BaseAuthHandler):
         payload = await self.make_request(
             self.build_payload(data, cookie=cookie, view_only=view_only),
             headers,
-            dict(request.cookies)
+            dict(request.cookies), request
         )
 
         payload['auth']['callback_url'] = payload['callback_url'] if callback_log else ''

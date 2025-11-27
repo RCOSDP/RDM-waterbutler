@@ -4,6 +4,7 @@ import asyncio
 import inspect  # noqa
 import logging
 from http import HTTPStatus
+import datetime
 
 import tornado.gen
 
@@ -86,11 +87,14 @@ class ProviderHandler(core.BaseHandler, CreateMixin, MetadataMixin, MoveCopyMixi
         # Delay setup of the provider when method is post, as we need to evaluate the json body
         # action.
         if method != 'post':
+            before_time = datetime.datetime.now()
             self.auth = await auth_handler.get(
                 self.resource, provider, self.request,
                 path=self.path, version=self.requested_version,
                 callback_log=self.callback_log,
                 location_id=self.location_id)
+            after_time = datetime.datetime.now()
+            logger.info(f'Auth handler request {self.request} took {(after_time - before_time).total_seconds()} seconds')
             self.provider = utils.make_provider(
                 provider, self.auth['auth'],
                 self.auth['credentials'], self.auth['settings'])
