@@ -372,6 +372,9 @@ class BaseProvider(metaclass=abc.ABCMeta):
         :param handle_naming: ( :class:`bool` ) If a naming conflict is detected, should it be automatically handled?
         :param file_size: ( :class:`int` ) The size of the file being moved, if want to try intra_move
         """
+        logger.info('Checking intra-move capability...')
+        logger.info(f'Source provider type: {type(self)}, Destination provider type: {type(dest_provider)}')
+        logger.info(f'File size: {file_size}')
         args = (dest_provider, src_path, dest_path)
         kwargs = {'rename': rename, 'conflict': conflict}
 
@@ -430,6 +433,9 @@ class BaseProvider(metaclass=abc.ABCMeta):
                    handle_naming: bool=True, version=None,
                    file_size: int=None) \
             -> typing.Tuple[wb_metadata.BaseMetadata, bool]:
+        logger.info('Checking intra-copy capability...')
+        logger.info(f'Source provider type: {type(self)}, Destination provider type: {type(dest_provider)}')
+        logger.info(f'File size: {file_size}')
         args = (dest_provider, src_path, dest_path)
         kwargs = {'rename': rename, 'conflict': conflict, 'handle_naming': handle_naming}
 

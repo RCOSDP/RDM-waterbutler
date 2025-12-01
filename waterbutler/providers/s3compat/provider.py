@@ -162,11 +162,17 @@ class S3CompatProvider(provider.BaseProvider):
         return True
 
     def can_intra_copy(self, dest_provider, path=None, file_size=None):
+        logger.info('Checking intra-copy capability...')
+        logger.info(f'Source provider type: {type(self)}, Destination provider type: {type(dest_provider)}')
+        logger.info(f'File size: {file_size}')
         if file_size is None or file_size > self.FILE_SIZE_INTRA_COPY_LIMIT:
             return False
         return type(self) == type(dest_provider) and not getattr(path, 'is_dir', False)
 
     def can_intra_move(self, dest_provider, path=None, file_size=None):
+        logger.info('Checking intra-move capability...')
+        logger.info(f'Source provider type: {type(self)}, Destination provider type: {type(dest_provider)}')
+        logger.info(f'File size: {file_size}')
         if file_size is None or file_size > self.FILE_SIZE_INTRA_COPY_LIMIT:
             return False
         return type(self) == type(dest_provider) and not getattr(path, 'is_dir', False)

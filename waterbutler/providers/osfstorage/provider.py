@@ -527,6 +527,7 @@ class OSFStorageProvider(provider.BaseProvider):
 
         source_file_metadata, _ = await provider.upload(stream, remote_pending_path, check_created=False,
                               fetch_metadata=False, **kwargs)
+        logger.info(f'Uploaded to storage provider: {source_file_metadata}')
         file_size = int(source_file_metadata.size)
 
         complete_name = stream.writers['sha256'].hexdigest
