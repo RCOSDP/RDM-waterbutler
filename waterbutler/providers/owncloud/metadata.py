@@ -53,11 +53,15 @@ class OwnCloudFileMetadata(BaseOwnCloudMetadata, metadata.BaseFileMetadata):
 class OwnCloudFolderMetadata(BaseOwnCloudMetadata, metadata.BaseFolderMetadata):
     @property
     def created(self):
-        return self.raw.get('created_at')
+        if '{DAV:}creationdate' in self.attributes:
+            return str(self.attributes['{DAV:}creationdate'])
+        return None
 
     @property
     def modified(self):
-        return self.raw.get('modified_at')
+        if '{DAV:}getlastmodified' in self.attributes:
+            return str(self.attributes['{DAV:}getlastmodified'])
+        return None
 
     @property
     def content_type(self):
