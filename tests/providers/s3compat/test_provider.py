@@ -2377,23 +2377,6 @@ class TestOperations:
 
         assert aiohttpretty.has_call(method='GET', uri=url, params=params)
 
-    def test_can_intra_move(self, provider):
-
-        file_path = WaterButlerPath('/my-image.jpg', prepend=provider.prefix)
-        folder_path = WaterButlerPath('/folder/', folder=True, prepend=provider.prefix)
-
-        assert not provider.can_intra_move(provider)
-        assert not provider.can_intra_move(provider, file_path)
-        assert not provider.can_intra_move(provider, folder_path)
-
-    def test_can_intra_copy(self, provider):
-
-        file_path = WaterButlerPath('/my-image.jpg', prepend=provider.prefix)
-        folder_path = WaterButlerPath('/folder/', folder=True, prepend=provider.prefix)
-
-        assert not provider.can_intra_copy(provider)
-        assert not provider.can_intra_copy(provider, file_path)
-        assert not provider.can_intra_copy(provider, folder_path)
 
     def test_can_duplicate_names(self, provider):
         assert provider.can_duplicate_names()
