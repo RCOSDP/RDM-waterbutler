@@ -39,7 +39,7 @@ class S3CompatSigV4FileMetadataHeaders(S3CompatSigV4Metadata, metadata.BaseFileM
 
     @property
     def content_type(self):
-        return self.raw['Content-Type']
+        return self.raw.get('Content-Type', 'application/octet-stream')
 
     @property
     def modified(self):

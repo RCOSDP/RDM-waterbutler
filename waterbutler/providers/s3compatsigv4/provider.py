@@ -331,7 +331,10 @@ class S3CompatSigV4Provider(provider.BaseProvider):
         # Create a new stream from the data
         upload_stream = streams.StringStream(stream_data)
 
-        headers = {'Content-MD5': md5_base64}
+        headers = {
+            'Content-Length': str(len(stream_data)),
+            'Content-MD5': md5_base64,
+        }
 
         # this is usually set in boto3 presigned url, but do it here
         # to be explicit about our header payloads for signing purposes
