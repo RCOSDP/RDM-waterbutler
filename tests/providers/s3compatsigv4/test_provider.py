@@ -29,13 +29,6 @@ from waterbutler.providers.s3compatsigv4.metadata import (S3CompatSigV4Revision,
                                                      S3CompatSigV4FileMetadataHeaders,
                                                      )
 from hmac import compare_digest
-from waterbutler.providers.s3compatsigv4.provider import prepare_xml_body_batches
-
-
-def prepare_xml_body(object_dict):
-    """Helper to prepare XML body for delete operations - returns first batch"""
-    return next(prepare_xml_body_batches(object_dict))
-
 
 @pytest.fixture
 def base_prefix():
@@ -758,21 +751,6 @@ def list_upload_chunks_body(parts_metadata):
     }
 
     return payload, headers
-
-
-def prepare_xml_body(object_dict):
-    payload = '<?xml version="1.0" encoding="UTF-8"?>'
-    payload += '<Delete>'
-    payload += ''.join(
-        '<Object><Key>{}</Key><VersionId>{}</VersionId></Object>'.format(
-            xml.sax.saxutils.escape(key), xml.sax.saxutils.escape(version)
-        )
-        for key, value in object_dict.items()
-        for version in value
-    )
-    payload += '</Delete>'
-    payload = payload.encode('utf-8')
-    return payload
 
 
 class TestProviderConstruction:
@@ -2253,9 +2231,16 @@ class TestMetadata:
                 {'headers': file_header_metadata},
             ],
         )
-        aiohttpretty.register_uri('PUT', url, status=200, headers={'ETag': '"bad hash"'})
 
-        with pytest.raises(exceptions.UploadChecksumMismatchError):
+        error_body = '''<?xml version="1.0" encoding="UTF-8"?>
+        <Error>
+            <Code>InvalidDigest</Code>
+            <Message>The Content-Md5 you specified is not valid.</Message>
+        </Error>'''
+
+        aiohttpretty.register_uri('PUT', url, status=400, body=error_body)
+
+        with pytest.raises(exceptions.UploadError):
             await provider.upload(file_stream, path)
 
         assert aiohttpretty.has_call(method='PUT', uri=url)
