@@ -37,30 +37,6 @@ def compute_md5(fp):
     return m.digest(), base64.b64encode(m.digest()).decode('utf-8')
 
 
-def prepare_xml_body_batches(object_dict, batch_size=1000):
-    """Generate batched XML payloads for multi-object delete (max 1000 objects per request).
-
-    :param dict object_dict: { key: [versionId, ...], ... }
-    :param int batch_size: number of <Object> entries per batch (<=1000 per AWS spec)
-    :return: yields bytes payloads
-    """
-    current_batch = []
-    for key, versions in object_dict.items():
-        for version in versions:
-            current_batch.append(
-                '<Object><Key>{}</Key><VersionId>{}</VersionId></Object>'.format(
-                    xml.sax.saxutils.escape(key), xml.sax.saxutils.escape(version)
-                )
-            )
-            if len(current_batch) >= batch_size:
-                yield ('<?xml version="1.0" encoding="UTF-8"?><Delete>{}</Delete>'
-                       .format(''.join(current_batch))).encode('utf-8')
-                current_batch = []
-    if current_batch:
-        yield ('<?xml version="1.0" encoding="UTF-8"?><Delete>{}</Delete>'
-               .format(''.join(current_batch))).encode('utf-8')
-
-
 class S3CompatSigV4Connection:
     def __init__(self, aws_access_key_id=None, aws_secret_access_key=None,
                  endpoint_url=None, region_name=None, use_ssl=True,
@@ -347,9 +323,15 @@ class S3CompatSigV4Provider(provider.BaseProvider):
     async def _contiguous_upload(self, stream, path):
         """Uploads the given stream in one request."""
 
-        stream.add_writer('md5', streams.HashStreamWriter(hashlib.md5))
+        # Read the entire stream to compute MD5
+        stream_data = await stream.read()
+        md5_digest = hashlib.md5(stream_data).digest()
+        md5_base64 = base64.b64encode(md5_digest).decode('utf-8')
 
-        headers = {'Content-Length': str(stream.size)}
+        # Create a new stream from the data
+        upload_stream = streams.StringStream(stream_data)
+
+        headers = {'Content-MD5': md5_base64}
 
         # this is usually set in boto3 presigned url, but do it here
         # to be explicit about our header payloads for signing purposes
@@ -366,7 +348,7 @@ class S3CompatSigV4Provider(provider.BaseProvider):
                 Params=query_parameters,
                 HttpMethod='PUT',
             ),
-            data=stream,
+            data=upload_stream,
             skip_auto_headers={'CONTENT-TYPE'},
             headers=headers,
             expects=(
@@ -375,11 +357,11 @@ class S3CompatSigV4Provider(provider.BaseProvider):
             ),
             throws=exceptions.UploadError,
         )
-        await resp.release()
 
-        # md5 is returned as ETag header as long as server side encryption is not used.
-        if stream.writers['md5'].hexdigest != resp.headers['ETag'].replace('"', ''):
-            raise exceptions.UploadChecksumMismatchError()
+        # S3-compatible server automatically validates Content-MD5
+        # If MD5 doesn't match, server returns 400 UploadError before writing data
+
+        await resp.release()
 
     async def _chunked_upload(self, stream, path):
         """Uploads the given stream to S3 over multiple chunks"""
@@ -1044,7 +1026,6 @@ class S3CompatSigV4Provider(provider.BaseProvider):
         )
 
         contents = await resp.read()
-        logger.info('S3CompatSigV4Provider._metadata_folder: %s', contents)
         parsed = xmltodict.parse(parse.unquote_plus(contents.decode('utf-8')), strip_whitespace=False)['ListBucketResult']
 
         next_token_string = parsed.get('NextMarker', '')
