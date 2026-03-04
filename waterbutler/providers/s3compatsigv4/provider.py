@@ -635,6 +635,22 @@ class S3CompatSigV4Provider(provider.BaseProvider):
 
         await resp.release()
 
+    async def move(self, dest_provider, src_path, dest_path,
+                  rename=None, conflict='replace', handle_naming=True):
+        """Override move to clean up orphaned S3 folder prefix objects after move."""
+        result = await super().move(
+            dest_provider, src_path, dest_path,
+            rename=rename, conflict=conflict, handle_naming=handle_naming,
+        )
+
+        # After moving a folder, clean up orphaned folder prefix object at source
+        if not src_path.is_file:
+            prefix = src_path.full_path.lstrip('/')
+            if await self._folder_prefix_exists(prefix):
+                await self._delete_folder_prefix(prefix)
+
+        return result
+
     async def delete(self, path, confirm_delete=0, **kwargs):
         """Delete the key and all its versions at the specified path
 
