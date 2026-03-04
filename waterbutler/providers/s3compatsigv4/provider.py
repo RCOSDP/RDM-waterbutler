@@ -742,6 +742,25 @@ class S3CompatSigV4Provider(provider.BaseProvider):
         else:
             await self._delete_folder(path, **kwargs)
 
+    async def _delete_folder_prefix(self, prefix):
+        """Delete the folder prefix object (e.g. 'foldername/') from S3."""
+        query_parameters = {'Bucket': self.bucket_name, 'Key': prefix}
+        resp = await self.make_request(
+            'DELETE',
+            functools.partial(
+                self.connection.generate_presigned_url,
+                'delete_object',
+                Params=query_parameters,
+                HttpMethod='DELETE',
+            ),
+            expects=(
+                HTTPStatus.OK,
+                HTTPStatus.NO_CONTENT,
+            ),
+            throws=exceptions.DeleteError,
+        )
+        await resp.release()
+
     async def _folder_prefix_exists(self, folder_prefix):
         # Even if the storage is MinIO, Contents with a leaf folder is
         # returned when a last slash of a prefix is removed.
@@ -800,7 +819,8 @@ class S3CompatSigV4Provider(provider.BaseProvider):
             # If versions unsupported, we cannot bulk-delete versions; fall back to NotFound or simple exit
             # For safety, attempt a basic listing check
             if await self._folder_prefix_exists(prefix):
-                # Nothing else to delete (no versions support), just return
+                # Delete the folder prefix object explicitly
+                await self._delete_folder_prefix(prefix)
                 return
             raise
 
@@ -809,16 +829,20 @@ class S3CompatSigV4Provider(provider.BaseProvider):
             raise exceptions.NotFoundError(str(path))
 
         version_map = {}
+        keys_without_version = []
         for item in versions + delete_markers:
             key = item.get('Key')
-            version_id = item.get('VersionId')
-            if not key or not version_id:
+            if not key:
                 continue
-            version_map.setdefault(key, []).append(version_id)
+            version_id = item.get('VersionId')
+            if version_id:
+                version_map.setdefault(key, []).append(version_id)
+            else:
+                keys_without_version.append({'Key': key})
 
         all_objects = [
             {'Key': k, 'VersionId': v} for k, vids in version_map.items() for v in vids
-        ]
+        ] + keys_without_version
         # AWS allows max 1000 objects per delete_objects call
         for i in range(0, len(all_objects), 1000):
             batch = all_objects[i: i + 1000]
