@@ -870,6 +870,10 @@ class S3CompatSigV4Provider(provider.BaseProvider):
             deleted_count = len(response.get('Deleted', []))
             logger.debug('Batch deleted %d objects from folder', deleted_count)
 
+        # Clean up folder prefix object if it still exists
+        if await self._folder_prefix_exists(prefix):
+            await self._delete_folder_prefix(prefix)
+
     async def get_full_revision(self, query_params):
         """
         Get all versions and delete markers of the requested object
