@@ -646,8 +646,10 @@ class S3CompatSigV4Provider(provider.BaseProvider):
         # After moving a folder, clean up orphaned folder prefix object at source
         if not src_path.is_file:
             prefix = src_path.full_path.lstrip('/')
-            if await self._folder_prefix_exists(prefix):
+            try:
                 await self._delete_folder_prefix(prefix)
+            except Exception:
+                pass
 
         return result
 
