@@ -834,13 +834,60 @@ class S3CompatSigV4Provider(provider.BaseProvider):
         try:
             parsed, versions, delete_markers = await self.get_full_revision(dict(list_query_params))
         except exceptions.MetadataError:
-            # If versions unsupported, we cannot bulk-delete versions; fall back to NotFound or simple exit
-            # For safety, attempt a basic listing check
-            if await self._folder_prefix_exists(prefix):
-                # Delete the folder prefix object explicitly
+            # Versioning not supported (e.g., MinIO). Fall back to ListObjectsV2.
+            all_objects = []
+            continuation_token = None
+            while True:
+                query_params = {
+                    'Bucket': self.bucket_name,
+                    'Prefix': prefix,
+                    'MaxKeys': 1000,
+                    'EncodingType': 'url',
+                }
+                if continuation_token:
+                    query_params['ContinuationToken'] = continuation_token
+                resp = await self.make_request(
+                    'GET',
+                    functools.partial(
+                        self.connection.generate_presigned_url,
+                        'list_objects_v2',
+                        Params=query_params,
+                        HttpMethod='GET',
+                    ),
+                    expects=(HTTPStatus.OK,),
+                    throws=exceptions.MetadataError,
+                )
+                contents = await resp.read()
+                parsed = xmltodict.parse(
+                    parse.unquote_plus(contents.decode('utf-8')),
+                    strip_whitespace=False,
+                )['ListBucketResult']
+                objects = parsed.get('Contents', [])
+                if isinstance(objects, dict):
+                    objects = [objects]
+                all_objects.extend({'Key': obj['Key']} for obj in objects if obj.get('Key'))
+
+                if parsed.get('IsTruncated') == 'true':
+                    continuation_token = parsed.get('NextContinuationToken')
+                else:
+                    break
+
+            if all_objects:
+                for i in range(0, len(all_objects), 1000):
+                    batch = all_objects[i:i + 1000]
+                    loop = asyncio.get_event_loop()
+                    await loop.run_in_executor(
+                        None,
+                        lambda d=batch: self.bucket.delete_objects(
+                            Delete={'Objects': d, 'Quiet': True}
+                        ),
+                    )
+            # Also clean up folder prefix
+            try:
                 await self._delete_folder_prefix(prefix)
-                return
-            raise
+            except Exception:
+                pass
+            return
 
         if not versions and not delete_markers:
             # No objects/versions -> treat as missing (parity with S3 provider)
