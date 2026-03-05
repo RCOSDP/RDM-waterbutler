@@ -866,6 +866,7 @@ class S3CompatSigV4Provider(provider.BaseProvider):
                 if isinstance(objects, dict):
                     objects = [objects]
                 all_objects.extend({'Key': obj['Key']} for obj in objects if obj.get('Key'))
+                logger.info('_delete_folder fallback: prefix=%s, found %d objects: %s', prefix, len(all_objects), [o['Key'] for o in all_objects[:10]])
 
                 if parsed.get('IsTruncated') == 'true':
                     continuation_token = parsed.get('NextContinuationToken')
@@ -882,6 +883,7 @@ class S3CompatSigV4Provider(provider.BaseProvider):
                             Delete={'Objects': d, 'Quiet': True}
                         ),
                     )
+                    logger.info('_delete_folder fallback: deleted batch of %d objects', len(batch))
             # Also clean up folder prefix
             try:
                 await self._delete_folder_prefix(prefix)
