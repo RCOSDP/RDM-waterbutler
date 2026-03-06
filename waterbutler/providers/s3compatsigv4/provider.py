@@ -682,40 +682,63 @@ class S3CompatSigV4Provider(provider.BaseProvider):
                         path.full_path: [
                             v.get('VersionId')
                             for v in full_version_list
-                            if v.get('VersionId')
+                            if v.get('VersionId') and v.get('VersionId') != 'null'
                         ]
                     }
 
                     version_ids = version_dict[path.full_path]
-                    # AWS allows max 1000 objects per delete_objects call
-                    for i in range(0, len(version_ids), 1000):
-                        batch = version_ids[i: i + 1000]
-                        delete_list = [
-                            {'Key': path.full_path, 'VersionId': vid} for vid in batch
-                        ]
-                        # Run synchronous boto3 call in executor to avoid blocking
-                        loop = asyncio.get_event_loop()
-                        response = await loop.run_in_executor(
-                            None,
-                            lambda d=delete_list: self.bucket.delete_objects(
-                                Delete={'Objects': d, 'Quiet': False}
+                    if not version_ids:
+                        # No real version IDs (e.g. MinIO without versioning returns 'null')
+                        # Delete the current object directly without specifying VersionId
+                        query_parameters = {
+                            'Bucket': self.bucket_name,
+                            'Key': path.full_path,
+                        }
+                        resp = await self.make_request(
+                            'DELETE',
+                            functools.partial(
+                                self.connection.generate_presigned_url,
+                                'delete_object',
+                                Params=query_parameters,
+                                HttpMethod='DELETE',
                             ),
+                            expects=(
+                                HTTPStatus.OK,
+                                HTTPStatus.NO_CONTENT,
+                            ),
+                            throws=exceptions.DeleteError,
                         )
-                        # Check for errors in response
-                        if 'Errors' in response and response['Errors']:
-                            error_msgs = [
-                                f'Key={e.get("Key")}, VersionId={e.get("VersionId")}, '
-                                f'Code={e.get("Code")}, Message={e.get("Message")}'
-                                for e in response["Errors"]
+                        await resp.release()
+                    else:
+                        # AWS allows max 1000 objects per delete_objects call
+                        for i in range(0, len(version_ids), 1000):
+                            batch = version_ids[i: i + 1000]
+                            delete_list = [
+                                {'Key': path.full_path, 'VersionId': vid} for vid in batch
                             ]
-                            logger.error(
-                                'Errors deleting objects: %s', '; '.join(error_msgs)
+                            # Run synchronous boto3 call in executor to avoid blocking
+                            loop = asyncio.get_event_loop()
+                            response = await loop.run_in_executor(
+                                None,
+                                lambda d=delete_list: self.bucket.delete_objects(
+                                    Delete={'Objects': d, 'Quiet': False}
+                                ),
                             )
-                            raise exceptions.DeleteError(
-                                f'Failed to delete some objects: {"; ".join(error_msgs[:3])}'
-                            )
-                        deleted_count = len(response.get('Deleted', []))
-                        logger.debug('Batch deleted %d versions', deleted_count)
+                            # Check for errors in response
+                            if 'Errors' in response and response['Errors']:
+                                error_msgs = [
+                                    f'Key={e.get("Key")}, VersionId={e.get("VersionId")}, '
+                                    f'Code={e.get("Code")}, Message={e.get("Message")}'
+                                    for e in response["Errors"]
+                                ]
+                                logger.error(
+                                    'Errors deleting objects: %s', '; '.join(error_msgs)
+                                )
+                                raise exceptions.DeleteError(
+                                    f'Failed to delete some objects: {"; ".join(error_msgs[:3])}'
+                                )
+                            deleted_count = len(response.get('Deleted', []))
+                            logger.debug('Batch deleted %d versions', deleted_count)
                 else:
                     # No versions -> delete current object directly
                     query_parameters = {
@@ -903,7 +926,10 @@ class S3CompatSigV4Provider(provider.BaseProvider):
             if not key:
                 continue
             version_id = item.get('VersionId')
-            if version_id:
+            # MinIO without versioning returns VersionId='null' (string).
+            # Passing VersionId='null' to delete_objects does not actually
+            # delete objects on MinIO, so treat it as no version.
+            if version_id and version_id != 'null':
                 version_map.setdefault(key, []).append(version_id)
             else:
                 keys_without_version.append({'Key': key})
