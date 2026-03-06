@@ -842,7 +842,6 @@ class S3CompatSigV4Provider(provider.BaseProvider):
                     'Bucket': self.bucket_name,
                     'Prefix': prefix,
                     'MaxKeys': 1000,
-                    'EncodingType': 'url',
                 }
                 if continuation_token:
                     query_params['ContinuationToken'] = continuation_token
@@ -859,7 +858,7 @@ class S3CompatSigV4Provider(provider.BaseProvider):
                 )
                 contents = await resp.read()
                 parsed = xmltodict.parse(
-                    parse.unquote_plus(contents.decode('utf-8')),
+                    contents.decode('utf-8'),
                     strip_whitespace=False,
                 )['ListBucketResult']
                 objects = parsed.get('Contents', [])
@@ -877,13 +876,15 @@ class S3CompatSigV4Provider(provider.BaseProvider):
                 for i in range(0, len(all_objects), 1000):
                     batch = all_objects[i:i + 1000]
                     loop = asyncio.get_event_loop()
-                    await loop.run_in_executor(
+                    response = await loop.run_in_executor(
                         None,
                         lambda d=batch: self.bucket.delete_objects(
-                            Delete={'Objects': d, 'Quiet': True}
+                            Delete={'Objects': d, 'Quiet': False}
                         ),
                     )
                     logger.info('_delete_folder fallback: deleted batch of %d objects', len(batch))
+                    if response.get('Errors'):
+                        logger.error('_delete_folder fallback: delete errors: %s', response['Errors'])
             # Also clean up folder prefix
             try:
                 await self._delete_folder_prefix(prefix)
