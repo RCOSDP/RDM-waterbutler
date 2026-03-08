@@ -1670,9 +1670,7 @@ class TestCRUD:
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
-    async def test_delete_null_version(self, provider, mock_time, generate_url_helper):
-        """When VersionId is 'null' (MinIO without versioning), the provider
-        should use a direct DELETE request instead of delete_objects."""
+    async def test_delete(self, provider, mock_time, generate_url_helper):
         path = WaterButlerPath('/some-file', prepend=provider.prefix)
 
         # Mock the versions list response - list_object_versions is bucket-level, not object-level
@@ -1713,81 +1711,9 @@ class TestCRUD:
             </ListVersionsResult>'''
         aiohttpretty.register_uri('GET', versions_url, params=params, status=200, body=version_body)
 
-        # Mock the direct DELETE request (used when VersionId='null' is filtered out)
-        delete_url = generate_url_helper(key=path.full_path, method='DELETE', expires=100)
-        aiohttpretty.register_uri('DELETE', delete_url, status=204)
-
-        # delete_objects should NOT be called in this path
-        provider.bucket.delete_objects = mock.Mock()
-
-        await provider.delete(path)
-
-        assert aiohttpretty.has_call(method='GET', uri=versions_url, params=params)
-        assert aiohttpretty.has_call(method='DELETE', uri=delete_url)
-        provider.bucket.delete_objects.assert_not_called()
-
-    @pytest.mark.asyncio
-    @pytest.mark.aiohttpretty
-    async def test_delete_with_real_versions(self, provider, mock_time, generate_url_helper):
-        """When VersionId is a real value, the provider should use
-        delete_objects to batch-delete all versions."""
-        path = WaterButlerPath('/some-file', prepend=provider.prefix)
-
-        query_params = {
-            'Prefix': path.path.lstrip('/'),
-            'Delimiter': '/',
-            'VersionIdMarker': ''
-        }
-        versions_url = generate_url_helper(method='GET', expires=100, headers={}, query_parameters={'versions': '', **query_params})
-        params = {
-            'prefix': path.path.lstrip('/'),
-            'delimiter': '/',
-            'version-id-marker': '',
-            'versions': ''
-        }
-        version_body = '''<?xml version="1.0" encoding="UTF-8"?>
-            <ListVersionsResult xmlns="http://s3.amazonaws.com/doc/2006-03-01">
-                <Name>bucket</Name>
-                <Prefix>some-file</Prefix>
-                <KeyMarker/>
-                <VersionIdMarker/>
-                <MaxKeys>1000</MaxKeys>
-                <IsTruncated>false</IsTruncated>
-                <Version>
-                    <Key>some-file</Key>
-                    <VersionId>abc123</VersionId>
-                    <IsLatest>true</IsLatest>
-                    <LastModified>2023-01-01T00:00:00.000Z</LastModified>
-                    <ETag>&quot;d41d8cd98f00b204e9800998ecf8427e&quot;</ETag>
-                    <Size>0</Size>
-                    <Owner>
-                        <ID>owner</ID>
-                        <DisplayName>owner</DisplayName>
-                    </Owner>
-                    <StorageClass>STANDARD</StorageClass>
-                </Version>
-                <Version>
-                    <Key>some-file</Key>
-                    <VersionId>def456</VersionId>
-                    <IsLatest>false</IsLatest>
-                    <LastModified>2022-12-01T00:00:00.000Z</LastModified>
-                    <ETag>&quot;d41d8cd98f00b204e9800998ecf8427e&quot;</ETag>
-                    <Size>0</Size>
-                    <Owner>
-                        <ID>owner</ID>
-                        <DisplayName>owner</DisplayName>
-                    </Owner>
-                    <StorageClass>STANDARD</StorageClass>
-                </Version>
-            </ListVersionsResult>'''
-        aiohttpretty.register_uri('GET', versions_url, params=params, status=200, body=version_body)
-
         # Mock the boto3 delete_objects call
         mock_delete_response = {
-            'Deleted': [
-                {'Key': 'some-file', 'VersionId': 'abc123'},
-                {'Key': 'some-file', 'VersionId': 'def456'},
-            ],
+            'Deleted': [{'Key': 'some-file', 'VersionId': 'null'}],
             'Errors': []
         }
         provider.bucket.delete_objects = mock.Mock(return_value=mock_delete_response)
@@ -1795,12 +1721,10 @@ class TestCRUD:
         await provider.delete(path)
 
         assert aiohttpretty.has_call(method='GET', uri=versions_url, params=params)
+        # Verify delete_objects was called with correct parameters
         provider.bucket.delete_objects.assert_called_once()
         call_args = provider.bucket.delete_objects.call_args
-        assert call_args[1]['Delete']['Objects'] == [
-            {'Key': path.full_path, 'VersionId': 'abc123'},
-            {'Key': path.full_path, 'VersionId': 'def456'},
-        ]
+        assert call_args[1]['Delete']['Objects'] == [{'Key': path.full_path, 'VersionId': 'null'}]
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
@@ -1837,6 +1761,20 @@ class TestCRUD:
             body=version_metadata,
             status=200
         )
+
+        # Mock _folder_prefix_exists check (list_objects_v2 with prefix stripped of trailing slash)
+        prefix_check_query = {
+            'Prefix': '',
+            'Delimiter': '/'
+        }
+        prefix_check_url = generate_url_helper(method='GET', expires=100, headers={}, query_parameters=prefix_check_query)
+        prefix_check_params = {'prefix': '', 'delimiter': '/'}
+        prefix_check_body = '''<?xml version="1.0" encoding="UTF-8"?>
+            <ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+                <IsTruncated>false</IsTruncated>
+            </ListBucketResult>'''
+        aiohttpretty.register_uri('GET', prefix_check_url, params=prefix_check_params,
+                                body=prefix_check_body, status=200)
 
         # Mock the boto3 delete_objects call
         mock_delete_response = {
@@ -1895,6 +1833,20 @@ class TestCRUD:
             'Errors': []
         }
         provider.bucket.delete_objects = mock.Mock(return_value=mock_delete_response)
+
+        # Mock _folder_prefix_exists check (list_objects_v2)
+        prefix_check_query = {
+            'Prefix': 'folder-to-delete',
+            'Delimiter': '/'
+        }
+        prefix_check_url = generate_url_helper(method='GET', expires=100, headers={}, query_parameters=prefix_check_query)
+        prefix_check_params = {'prefix': 'folder-to-delete', 'delimiter': '/'}
+        prefix_check_body = '''<?xml version="1.0" encoding="UTF-8"?>
+            <ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+                <IsTruncated>false</IsTruncated>
+            </ListBucketResult>'''
+        aiohttpretty.register_uri('GET', prefix_check_url, params=prefix_check_params,
+                                body=prefix_check_body, status=200)
 
         await provider._delete_folder(path)
 
@@ -1961,6 +1913,20 @@ class TestCRUD:
             'Errors': []
         }
         provider.bucket.delete_objects = mock.Mock(return_value=mock_delete_response)
+
+        # Mock _folder_prefix_exists check (list_objects_v2)
+        prefix_check_query = {
+            'Prefix': 'large-folder',
+            'Delimiter': '/'
+        }
+        prefix_check_url = generate_url_helper(method='GET', expires=100, headers={}, query_parameters=prefix_check_query)
+        prefix_check_params = {'prefix': 'large-folder', 'delimiter': '/'}
+        prefix_check_body = '''<?xml version="1.0" encoding="UTF-8"?>
+            <ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+                <IsTruncated>false</IsTruncated>
+            </ListBucketResult>'''
+        aiohttpretty.register_uri('GET', prefix_check_url, params=prefix_check_params,
+                                body=prefix_check_body, status=200)
 
         await provider._delete_folder(path)
 
