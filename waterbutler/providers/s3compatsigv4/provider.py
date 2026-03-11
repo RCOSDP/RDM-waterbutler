@@ -6,6 +6,7 @@ from urllib import parse
 import re
 import logging
 import xml.sax.saxutils
+from xml.parsers.expat import ExpatError
 from io import BytesIO
 import base64
 
@@ -204,7 +205,7 @@ class S3CompatSigV4Provider(provider.BaseProvider):
         try:
             # memo: If no element, the parser will raise an ExpatError.
             result = xmltodict.parse(response_body)
-        except Exception:
+        except ExpatError:
             logger.warning(f'Couldn\'t parse {s3_api_name} result "{response_body}"')
             raise
 
@@ -377,11 +378,11 @@ class S3CompatSigV4Provider(provider.BaseProvider):
             parts_metadata = await self._upload_parts(stream, path, session_upload_id)
             # Step 3. Commit the parts and end the upload session
             await self._complete_multipart_upload(path, session_upload_id, parts_metadata)
-        except Exception as err:
+        except exceptions.UploadError as err:
             msg = 'An unexpected error has occurred during the multi-part upload.'
             logger.error('{} upload_id={} error={!r}'.format(msg, session_upload_id, err))
             aborted = await self._abort_chunked_upload(path, session_upload_id)
-            if aborted:
+            if not aborted:
                 msg += '  The abort action failed to clean up the temporary file parts generated ' \
                        'during the upload process.  Please manually remove them.'
             raise exceptions.UploadError(msg)
@@ -535,7 +536,7 @@ class S3CompatSigV4Provider(provider.BaseProvider):
                     # Abort is successful when there is no part left
                     is_aborted = True
                     break
-            except Exception as err:
+            except (exceptions.UploadError, ExpatError) as err:
                 msg = 'An unexpected error has occurred during the aborting a multipart upload.'
                 logger.error('{} upload_id={} error={!r}'.format(msg, session_upload_id, err))
 
@@ -648,8 +649,8 @@ class S3CompatSigV4Provider(provider.BaseProvider):
             prefix = src_path.full_path.lstrip('/')
             try:
                 await self._delete_folder_prefix(prefix)
-            except Exception:
-                pass
+            except exceptions.DeleteError:
+                logger.warning('Failed to clean up folder prefix after move: %s', prefix)
 
         return result
 
@@ -886,8 +887,8 @@ class S3CompatSigV4Provider(provider.BaseProvider):
             # Also clean up folder prefix
             try:
                 await self._delete_folder_prefix(prefix)
-            except Exception:
-                pass
+            except exceptions.DeleteError:
+                logger.warning('Failed to clean up folder prefix in _delete_folder fallback: %s', prefix)
             return
 
         if not versions and not delete_markers:
