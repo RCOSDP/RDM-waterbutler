@@ -381,11 +381,11 @@ class S3CompatSigV4Provider(provider.BaseProvider):
             parts_metadata = await self._upload_parts(stream, path, session_upload_id)
             # Step 3. Commit the parts and end the upload session
             await self._complete_multipart_upload(path, session_upload_id, parts_metadata)
-        except exceptions.UploadError as err:
+        except Exception as err:
             msg = 'An unexpected error has occurred during the multi-part upload.'
             logger.error('{} upload_id={} error={!r}'.format(msg, session_upload_id, err))
             aborted = await self._abort_chunked_upload(path, session_upload_id)
-            if not aborted:
+            if aborted:
                 msg += '  The abort action failed to clean up the temporary file parts generated ' \
                        'during the upload process.  Please manually remove them.'
             raise exceptions.UploadError(msg)
@@ -539,7 +539,7 @@ class S3CompatSigV4Provider(provider.BaseProvider):
                     # Abort is successful when there is no part left
                     is_aborted = True
                     break
-            except (exceptions.UploadError, ExpatError) as err:
+            except Exception as err:
                 msg = 'An unexpected error has occurred during the aborting a multipart upload.'
                 logger.error('{} upload_id={} error={!r}'.format(msg, session_upload_id, err))
 
