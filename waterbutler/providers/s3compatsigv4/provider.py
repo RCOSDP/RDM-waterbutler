@@ -206,11 +206,12 @@ class S3CompatSigV4Provider(provider.BaseProvider):
             # memo: If no element, the parser will raise an ExpatError.
             result = xmltodict.parse(response_body)
         except ExpatError:
-            logger.warning(f'Couldn\'t parse {s3_api_name} result "{response_body}"')
+            logger.warning('Couldn\'t parse %s result', s3_api_name)
             raise
 
         if 'Error' in result:
-            logger.warning(f'{s3_api_name} returned with an error "{response_body}"')
+            error_code = result['Error'].get('Code', 'Unknown')
+            logger.warning('%s returned with an error: %s', s3_api_name, error_code)
             raise exception_type(
                 f'{s3_api_name} returned with an error.',
                 code=HTTPStatus.INTERNAL_SERVER_ERROR,
@@ -245,6 +246,7 @@ class S3CompatSigV4Provider(provider.BaseProvider):
                 else:
                     pre_size = e - s + 1
         except exceptions.MetadataError:
+            logger.debug('Could not retrieve metadata for pre-flight check, skipping')
             pre_size = None
             pre_etag = None
 
@@ -283,6 +285,7 @@ class S3CompatSigV4Provider(provider.BaseProvider):
             if get_etag != pre_etag:
                 pre_size = None
         except KeyError:
+            # ETag header may not be present in all responses
             pass
 
         download_stream = streams.ResponseStreamReader(resp)
@@ -666,7 +669,7 @@ class S3CompatSigV4Provider(provider.BaseProvider):
                     'confirm_delete=1 is required for deleting root provider folder',
                     code=HTTPStatus.BAD_REQUEST,
                 )
-        logger.info('Deleting path: %s', path.full_path)
+        logger.debug('Deleting path: %s', path.full_path)
         if path.is_file:
             # Retrieve and delete all versions (batched) similar to S3 provider
             try:
@@ -704,16 +707,13 @@ class S3CompatSigV4Provider(provider.BaseProvider):
                         )
                         # Check for errors in response
                         if 'Errors' in response and response['Errors']:
-                            error_msgs = [
-                                f'Key={e.get("Key")}, VersionId={e.get("VersionId")}, '
-                                f'Code={e.get("Code")}, Message={e.get("Message")}'
-                                for e in response["Errors"]
-                            ]
+                            error_count = len(response['Errors'])
+                            error_codes = [e.get('Code', 'Unknown') for e in response['Errors']]
                             logger.error(
-                                'Errors deleting objects: %s', '; '.join(error_msgs)
+                                'Errors deleting objects: count=%d, codes=%s', error_count, error_codes
                             )
                             raise exceptions.DeleteError(
-                                f'Failed to delete some objects: {"; ".join(error_msgs[:3])}'
+                                'Failed to delete some objects: {} error(s)'.format(error_count)
                             )
                         deleted_count = len(response.get('Deleted', []))
                         logger.debug('Batch deleted %d versions', deleted_count)
@@ -739,9 +739,9 @@ class S3CompatSigV4Provider(provider.BaseProvider):
                     )
                     await resp.release()
             except exceptions.MetadataError:
-                # Skip if versions cannot be retrieved
-                # or if the file has no versions
-                # In this case, delete the current version directly
+                # Versions cannot be retrieved (e.g. MinIO without versioning).
+                # Fall back to deleting the current version directly.
+                logger.debug('Version listing not available, falling back to direct delete')
                 query_parameters = {'Bucket': self.bucket_name, 'Key': path.full_path}
                 resp = await self.make_request(
                     'DELETE',
@@ -883,7 +883,9 @@ class S3CompatSigV4Provider(provider.BaseProvider):
                         ),
                     )
                     if response.get('Errors'):
-                        logger.error('_delete_folder fallback: delete errors: %s', response['Errors'])
+                        error_count = len(response['Errors'])
+                        error_codes = [e.get('Code', 'Unknown') for e in response['Errors']]
+                        logger.error('_delete_folder fallback: %d delete error(s), codes=%s', error_count, error_codes)
             # Also clean up folder prefix
             try:
                 await self._delete_folder_prefix(prefix)
@@ -923,16 +925,13 @@ class S3CompatSigV4Provider(provider.BaseProvider):
             )
             # Check for errors in response
             if 'Errors' in response and response['Errors']:
-                error_msgs = [
-                    f"Key={e.get('Key')}, VersionId={e.get('VersionId')}, "
-                    f"Code={e.get('Code')}, Message={e.get('Message')}"
-                    for e in response['Errors']
-                ]
+                error_count = len(response['Errors'])
+                error_codes = [e.get('Code', 'Unknown') for e in response['Errors']]
                 logger.error(
-                    'Errors deleting folder objects: %s', '; '.join(error_msgs)
+                    'Errors deleting folder objects: count=%d, codes=%s', error_count, error_codes
                 )
                 raise exceptions.DeleteError(
-                    f'Failed to delete some objects: {"; ".join(error_msgs[:3])}'
+                    'Failed to delete some objects: {} error(s)'.format(error_count)
                 )
             deleted_count = len(response.get('Deleted', []))
             logger.debug('Batch deleted %d objects from folder', deleted_count)
@@ -967,7 +966,6 @@ class S3CompatSigV4Provider(provider.BaseProvider):
             )
 
             response_body = await resp.read()
-            logger.debug('ListObjectVersions response: {}'.format(response_body.decode('utf-8')))
             parsed = xmltodict.parse(response_body.decode('utf-8'), strip_whitespace=False)['ListVersionsResult']
 
             # Append current page's versions and delete markers
@@ -1027,7 +1025,7 @@ class S3CompatSigV4Provider(provider.BaseProvider):
         except exceptions.MetadataError as e:
             # MinIO may not support "versions" from boto3 presigned url.
             # (And, MinIO does not support ListObjectVersions yet.)
-            logger.info('ListObjectVersions may not be supported: url={}: {}'.format(list_url, str(e)))
+            logger.info('ListObjectVersions may not be supported: %s', str(e))
             return []
 
         response_body = await resp.read()
