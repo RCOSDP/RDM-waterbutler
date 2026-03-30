@@ -8,9 +8,9 @@ on:
     branches: [ master, develop ]
 
 env:
-  - WHEELHOUSE: $HOME/wheelhouse
-  - WATERBUTLER_CONFIG: ./travis-config.json
-  - BOTO_CONFIG: /dev/null
+  WHEELHOUSE: $HOME/wheelhouse
+  WATERBUTLER_CONFIG: ./travis-config.json
+  BOTO_CONFIG: /dev/null
 
 jobs:
   build-image:
