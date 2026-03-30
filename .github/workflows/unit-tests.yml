@@ -60,7 +60,7 @@ jobs:
       - name: Download Docker image artifact
         uses: actions/download-artifact@v4
         with:
-          name: rdmcwb-image
+          name: rdm-wb-image
           path: /tmp
 
       - name: Load Docker image
