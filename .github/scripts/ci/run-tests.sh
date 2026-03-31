@@ -12,7 +12,7 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 cd "$REPO_ROOT"
 
 read -r -d '' container_script <<'BASH' || true
-pip install flake8
+pip install -r dev-requirements.txt
 invoke test
 BASH
 
