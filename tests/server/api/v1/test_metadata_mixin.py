@@ -13,6 +13,7 @@ from tests.server.api.v1.fixtures import (http_request, handler_auth, mock_strea
                                           mock_folder_children_provider_s3, auth, settings, credentials)
 from waterbutler.providers.s3 import S3Provider
 from waterbutler.providers.s3compat import S3CompatProvider
+from tests.core.streams.fixtures import mock_response_stream_reader
 
 
 @pytest.fixture
@@ -307,3 +308,54 @@ class TestMetadataMixin:
         assert handler._headers['Content-Disposition'] == expected
 
         handler.write_stream.assert_called_once_with(mock_stream)
+
+    @pytest.mark.asyncio
+    async def test_download_file_header_chunked_with_response_stream_reader(self, http_request, mock_response_stream_reader):
+
+        handler = mock_handler(http_request)
+        mock_response_stream_reader.response.headers['Transfer-Encoding'] = 'chunked'
+        handler.provider.download = MockCoroutine(return_value=mock_response_stream_reader)
+        handler.path = WaterButlerPath('/test_file')
+        handler.bytes_downloaded = '100'
+
+        await handler.download_file()
+        assert handler._headers['Content-Length'] == '100'
+        assert handler._headers['Content-Type'] == mock_response_stream_reader.content_type
+        disposition = 'attachment; filename="test stream"; filename*=UTF-8\'\'test%20stream'
+        assert handler._headers['Content-Disposition'] == disposition
+
+        handler.write_stream.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_download_file_header_gzip_with_response_stream_reader(self, http_request, mock_response_stream_reader):
+
+        handler = mock_handler(http_request)
+        mock_response_stream_reader.response.headers['Content-Encoding'] = 'gzip'
+        handler.provider.download = MockCoroutine(return_value=mock_response_stream_reader)
+        handler.path = WaterButlerPath('/test_file')
+        handler.bytes_downloaded = '100'
+
+        await handler.download_file()
+        assert handler._headers['Content-Length'] == '100'
+        assert handler._headers['Content-Type'] == mock_response_stream_reader.content_type
+        disposition = 'attachment; filename="test stream"; filename*=UTF-8\'\'test%20stream'
+        assert handler._headers['Content-Disposition'] == disposition
+
+        handler.write_stream.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_download_file_header_gzip_bytes_downloaded_is_none_with_response_stream_reader(self, http_request, mock_response_stream_reader):
+
+        handler = mock_handler(http_request)
+        assert 'Content-Length' not in handler._headers
+        mock_response_stream_reader.response.headers['Content-Encoding'] = 'gzip'
+        handler.provider.download = MockCoroutine(return_value=mock_response_stream_reader)
+        handler.path = WaterButlerPath('/test_file')
+        handler.bytes_downloaded = None
+
+        await handler.download_file()
+        assert handler._headers['Content-Type'] == mock_response_stream_reader.content_type
+        disposition = 'attachment; filename="test stream"; filename*=UTF-8\'\'test%20stream'
+        assert handler._headers['Content-Disposition'] == disposition
+
+        handler.write_stream.assert_awaited_once()
