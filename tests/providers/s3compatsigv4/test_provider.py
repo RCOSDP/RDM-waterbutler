@@ -497,6 +497,33 @@ def folder_metadata(base_prefix):
 
 
 @pytest.fixture
+def folder_metadata_paginated(base_prefix):
+    return '''<?xml version="1.0" encoding="UTF-8"?>
+        <ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+            <Name>bucket</Name>
+            <Prefix/>
+            <Marker/>
+            <MaxKeys>1000</MaxKeys>
+            <IsTruncated>true</IsTruncated>
+            <NextContinuationToken>token-for-next-page</NextContinuationToken>
+            <Contents>
+                <Key>{prefix}my-image.jpg</Key>
+                <LastModified>2009-10-12T17:50:30.000Z</LastModified>
+                <ETag>&quot;fba9dede5f27731c9771645a39863328&quot;</ETag>
+                <Size>434234</Size>
+                <StorageClass>STANDARD</StorageClass>
+                <Owner>
+                    <ID>75aa57f09aa0c8caeab4f8c24e99d10f8e7faeebf76c078efc7c6caea54ba06a</ID>
+                    <DisplayName>mtd@amazon.com</DisplayName>
+                </Owner>
+            </Contents>
+            <CommonPrefixes>
+                <Prefix>{prefix}   photos/</Prefix>
+            </CommonPrefixes>
+        </ListBucketResult>'''.format(prefix=base_prefix)
+
+
+@pytest.fixture
 def folder_single_item_metadata(base_prefix):
     return'''<?xml version="1.0" encoding="UTF-8"?>
     <ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
@@ -2043,14 +2070,15 @@ class TestMetadata:
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
-    async def test_metadata_have_next_token(self, provider, folder_metadata, mock_time, generate_url_helper):
+    async def test_metadata_empty_next_token_ignored(self, provider, folder_metadata, mock_time, generate_url_helper):
+        """Empty next_token should not send ContinuationToken to S3,
+        preventing InvalidArgument errors from the storage backend."""
         path = WaterButlerPath('/darp/')
         query_params = {
             'Prefix': path.full_path.lstrip('/'),
             'Delimiter': '/',
             'MaxKeys': 1000,
             'EncodingType': 'url',
-            'ContinuationToken': ''
         }
         url = generate_url_helper(method='GET', expires=100, headers={}, query_parameters=query_params)
         params = {
@@ -2059,7 +2087,6 @@ class TestMetadata:
             'delimiter': '/',
             'max-keys': '1000',
             'encoding-type': 'url',
-            'continuation-token': ''
         }
 
         aiohttpretty.register_uri('GET', url, params=params, body=folder_metadata,
@@ -2075,14 +2102,17 @@ class TestMetadata:
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
-    async def test_metadata_folder_have_next_token(self, provider, folder_metadata, mock_time, generate_url_helper):
+    async def test_metadata_folder_with_valid_continuation_token(self, provider, folder_metadata_paginated, mock_time, generate_url_helper):
+        """Valid next_token should be sent as ContinuationToken and the response
+        with NextContinuationToken should be handled correctly."""
         path = WaterButlerPath('/darp/')
+        token = 'abc123-valid-token'
         query_params = {
             'Prefix': path.full_path.lstrip('/'),
             'Delimiter': '/',
             'MaxKeys': 1000,
             'EncodingType': 'url',
-            'ContinuationToken': ''
+            'ContinuationToken': token,
         }
         url = generate_url_helper(method='GET', expires=100, headers={}, query_parameters=query_params)
         params = {
@@ -2091,19 +2121,21 @@ class TestMetadata:
             'delimiter': '/',
             'max-keys': '1000',
             'encoding-type': 'url',
-            'continuation-token': ''
+            'continuation-token': token,
         }
 
-        aiohttpretty.register_uri('GET', url, params=params, body=folder_metadata,
+        aiohttpretty.register_uri('GET', url, params=params, body=folder_metadata_paginated,
                                   headers={'Content-Type': 'application/xml'})
 
-        result = await provider._metadata_folder(path, next_token='')
+        result = await provider._metadata_folder(path, next_token=token)
 
         assert isinstance(result, list)
+        # 1 CommonPrefixes + 1 Contents + 1 next_token marker = 3 items
         assert len(result) == 3
         assert result[0].name == '   photos'
         assert result[1].name == 'my-image.jpg'
-        assert result[2].extra['md5'] == '1b2cf535f27731c974343645a3985328'
+        # Last item is the next_token marker for pagination
+        assert result[2].kind == 'folder'
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty

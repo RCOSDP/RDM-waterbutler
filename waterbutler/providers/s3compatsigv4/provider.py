@@ -1123,7 +1123,7 @@ class S3CompatSigV4Provider(provider.BaseProvider):
             'MaxKeys': 1000,
             'EncodingType': 'url',
         }
-        if next_token is not None:
+        if next_token:
             query_parameters['ContinuationToken'] = next_token
 
         resp = await self.make_request(
@@ -1202,5 +1202,5 @@ class S3CompatSigV4Provider(provider.BaseProvider):
                 items.append(S3CompatSigV4FileMetadata(self, content))
 
         if next_token_string:
-            items.append(S3CompatSigV4FolderMetadata(self, {'Key': next_token_string}))
+            items.append(S3CompatSigV4FolderMetadata(self, {'Prefix': next_token_string}))
         return items
