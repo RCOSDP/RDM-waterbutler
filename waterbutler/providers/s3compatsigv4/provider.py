@@ -886,6 +886,9 @@ class S3CompatSigV4Provider(provider.BaseProvider):
                         error_count = len(response['Errors'])
                         error_codes = [e.get('Code', 'Unknown') for e in response['Errors']]
                         logger.error('_delete_folder fallback: %d delete error(s), codes=%s', error_count, error_codes)
+                        raise exceptions.DeleteError(
+                            'Failed to delete some objects: {} error(s)'.format(error_count)
+                        )
             # Also clean up folder prefix
             try:
                 await self._delete_folder_prefix(prefix)
@@ -1136,11 +1139,29 @@ class S3CompatSigV4Provider(provider.BaseProvider):
         )
 
         contents = await resp.read()
-        parsed = xmltodict.parse(parse.unquote_plus(contents.decode('utf-8')), strip_whitespace=False)['ListBucketResult']
+        parsed = xmltodict.parse(contents.decode('utf-8'), strip_whitespace=False)['ListBucketResult']
 
-        next_token_string = parsed.get('NextMarker', '')
+        next_token_string = parsed.get('NextContinuationToken', '')
         contents = parsed.get('Contents', [])
         prefixes = parsed.get('CommonPrefixes', [])
+
+        # Decode URL-encoded fields after XML parsing (not before).
+        # EncodingType=url causes S3 to URL-encode specific fields (Key, Prefix, etc.)
+        # but decoding the entire XML before parsing would break XML with
+        # special characters (e.g. & in key names).
+        if parsed.get('EncodingType') == 'url':
+            if isinstance(contents, dict):
+                contents = [contents]
+            for item in contents:
+                if 'Key' in item:
+                    item['Key'] = parse.unquote(item['Key'])
+            if isinstance(prefixes, dict):
+                prefixes = [prefixes]
+            for item in prefixes:
+                if 'Prefix' in item:
+                    item['Prefix'] = parse.unquote(item['Prefix'])
+            if next_token_string:
+                next_token_string = parse.unquote(next_token_string)
 
         if not contents and not prefixes and not path.is_root:
             # If contents and prefixes are empty then this "folder"
