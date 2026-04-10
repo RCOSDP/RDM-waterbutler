@@ -2130,12 +2130,12 @@ class TestMetadata:
         result = await provider._metadata_folder(path, next_token=token)
 
         assert isinstance(result, list)
-        # 1 CommonPrefixes + 1 Contents + 1 next_token marker = 3 items
+        # 1 CommonPrefixes + 1 Contents + 1 next_token string = 3 items
         assert len(result) == 3
         assert result[0].name == '   photos'
         assert result[1].name == 'my-image.jpg'
-        # Last item is the next_token marker for pagination
-        assert result[2].kind == 'folder'
+        # Last item is the next_token string for pagination
+        assert result[2] == 'token-for-next-page'
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
