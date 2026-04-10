@@ -1202,5 +1202,5 @@ class S3CompatSigV4Provider(provider.BaseProvider):
                 items.append(S3CompatSigV4FileMetadata(self, content))
 
         if next_token_string:
-            items.append(S3CompatSigV4FolderMetadata(self, {'Prefix': next_token_string}))
+            items.append(next_token_string)
         return items
