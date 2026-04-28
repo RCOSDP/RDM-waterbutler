@@ -478,8 +478,15 @@ class OSFStorageProvider(provider.BaseProvider):
         """
 
         created = True
+        replaced_size = 0
         if dest_path.identifier:
             created = False
+            try:
+                dest_meta = await dest_provider.metadata(dest_path)
+                if hasattr(dest_meta, 'size') and dest_meta.size:
+                    replaced_size = int(dest_meta.size)
+            except Exception:
+                replaced_size = 0
             await dest_provider.delete(dest_path)
 
         resp = await self.make_signed_request(
@@ -492,7 +499,8 @@ class OSFStorageProvider(provider.BaseProvider):
                     'name': dest_path.name,
                     'node': dest_provider.nid,
                     'parent': dest_path.parent.identifier
-                }
+                },
+                'replaced_size': replaced_size,
             }),
             headers={'Content-Type': 'application/json'},
             expects=(200, 201)

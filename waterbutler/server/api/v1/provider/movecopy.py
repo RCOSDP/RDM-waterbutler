@@ -145,6 +145,32 @@ class MoveCopyMixin:
             )
             self.dest_path = await self.dest_provider.validate_path(**self.json)
 
+            # Check if the file/folder is oversized
+            max_size_mb = self.dest_auth['settings'].get('max_file_size')
+            max_size_bytes = (int(max_size_mb) * 1024 * 1024) if max_size_mb else None
+
+            data = await self.provider.metadata(self.path, version=None, revision=None, next_token=None)
+            if self.path.is_dir:
+                if data and isinstance(data[-1], str):
+                    data, token = self.provider.handle_data(data)
+            else:
+                data = [data]
+            oversized_files = await self.get_folder_info(data, max_size_bytes)
+
+            if oversized_files:
+                raise exceptions.InvalidParameters({
+                    'message': "Move/Copy Failed due to oversized files.",
+                    'oversized_files': oversized_files
+                }, code=413)
+
+            # verify the quota if it is osfstorage
+            if self.dest_provider.NAME == 'osfstorage':
+                data = await self.provider.metadata(self.path, version=None, revision=None, next_token=None)
+                file_size = await self.get_file_size(data)
+                quota = await self.dest_provider.get_quota()
+                if quota['used'] + file_size > quota['max']:
+                    raise exceptions.NotEnoughQuotaError('You do not have enough available quota.')
+
         if not getattr(self.provider, 'can_intra_' + provider_action)(self.dest_provider, self.path):
             # this weird signature syntax courtesy of py3.4 not liking trailing commas on kwargs
             conflict = self.json.get('conflict', DEFAULT_CONFLICT)
@@ -187,3 +213,47 @@ class MoveCopyMixin:
             self.set_status(int(HTTPStatus.OK))
 
         self.write({'data': metadata.json_api_serialized(self.dest_resource)})
+
+    async def get_file_size(self, data):
+        size = 0
+        if not isinstance(data, list):
+            data = [data]
+        for x in data:
+            if x.kind == 'file':
+                size += int(x.size)
+            else:
+                child_path = await self.provider.validate_v1_path(x.path, **self.arguments)
+                data_child = await self.provider.metadata(child_path, version=None, revision=None, next_token=None)
+                if self.path.is_dir:
+                    if data_child and isinstance(data_child[-1], str):
+                        data_child, token = self.provider.handle_data(data_child)
+                else:
+                    data_child = [data_child]
+                size += await self.get_file_size(data_child)
+        return size
+
+    async def get_folder_info(self, data, max_size_bytes=None):
+        oversized = []
+        # Sort data to same as UI display order
+        sorted_data = sorted(data, key=lambda i: (0 if i.kind == 'folder' else 1, i.name.lower()))
+        for x in sorted_data:
+            if x.kind == 'file':
+                file_size = int(x.size)
+                if max_size_bytes and file_size > max_size_bytes:
+                    oversized.append({
+                        'name': x.name,
+                        'size': file_size
+                    })
+            else:
+                child_path = await self.provider.validate_v1_path(x.path, **self.arguments)
+                data_child = await self.provider.metadata(child_path, version=None, revision=None, next_token=None)
+                if self.path.is_dir:
+                    if data_child and isinstance(data_child[-1], str):
+                        data_child, token = self.provider.handle_data(data_child)
+                else:
+                    data_child = [data_child]
+
+                child_oversized = await self.get_folder_info(data_child, max_size_bytes)
+                oversized.extend(child_oversized)
+
+        return oversized

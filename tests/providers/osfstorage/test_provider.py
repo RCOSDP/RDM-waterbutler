@@ -487,7 +487,11 @@ class TestIntraMoveCopy:
 
         dest_provider.delete.assert_called_once_with(WaterButlerPath('/folder1/'))
         dest_provider.validate_v1_path.assert_called_once_with('/folder1/')
-        dest_provider._children_metadata.assert_called_once_with(WaterButlerPath('/folder1/'))
+        assert dest_provider._children_metadata.call_count == 2
+        dest_provider._children_metadata.assert_has_calls([
+            mock.call(WaterButlerPath('/folder1/')),
+            mock.call(WaterButlerPath('/folder1/')),
+        ])
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
@@ -1038,3 +1042,43 @@ class TestQuota:
 
         assert quota['max'] == 10000
         assert quota['used'] == 5000
+
+    @pytest.mark.asyncio
+    async def test__do_intra_move_or_copy_replaced_size(self, provider_one, auth, credentials,
+                                                        settings_region_one):
+        # Arrange: Prepare provider and destination provider mocks
+        settings_region_one['nid'] = 'fake-nid'
+        provider = OSFStorageProvider(auth, credentials, settings_region_one)
+        dest_provider = mock.Mock()
+        dest_provider.nid = 'fake-nid'
+        dest_path = mock.Mock()
+        dest_path.identifier = 'some-id' # Ensure identifier is set to trigger replaced_size logic
+        dest_path.name = 'file.txt'
+        dest_path.parent = mock.Mock()
+        dest_path.parent.identifier = 'parent-id'
+        src_path = mock.Mock()
+        src_path.identifier = 'src-id'
+        src_path.name = 'srcfile.txt'
+        src_path.parent = mock.Mock()
+        src_path.parent.identifier = 'src-parent-id'
+
+        # Mock metadata to return an object with a size attribute
+        meta_mock = mock.Mock()
+        meta_mock.size = 1234
+        dest_provider.metadata = utils.MockCoroutine(return_value=meta_mock)
+        dest_provider.delete = utils.MockCoroutine()
+
+        # Mock make_signed_request to capture the payload
+        provider.make_signed_request = utils.MockCoroutine()
+        provider.make_signed_request.return_value.json = utils.MockCoroutine(return_value={'kind': 'file'})
+
+        # Act: Call the method under test
+        await provider._do_intra_move_or_copy('copy', dest_provider, src_path, dest_path)
+
+        # Assert: Check that replaced_size is included in the payload
+        args, kwargs = provider.make_signed_request.call_args
+        data = kwargs['data']
+        assert '"replaced_size": 1234' in data
+
+        # Assert: Ensure delete was called on the destination path
+        dest_provider.delete.assert_called_once_with(dest_path)
