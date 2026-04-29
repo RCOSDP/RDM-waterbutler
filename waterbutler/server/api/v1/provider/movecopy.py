@@ -160,7 +160,8 @@ class MoveCopyMixin:
             if oversized_files:
                 raise exceptions.InvalidParameters({
                     'message': "Move/Copy Failed due to oversized files.",
-                    'oversized_files': oversized_files
+                    'oversized_files': oversized_files,
+                    'max_size': max_size_bytes
                 }, code=413)
 
             # verify the quota if it is osfstorage
@@ -169,7 +170,10 @@ class MoveCopyMixin:
                 file_size = await self.get_file_size(data)
                 quota = await self.dest_provider.get_quota()
                 if quota['used'] + file_size > quota['max']:
-                    raise exceptions.NotEnoughQuotaError('You do not have enough available quota.')
+                    raise exceptions.NotEnoughQuotaError({
+                        'message_key': 'quota_exceeded',
+                        'message': 'You do not have enough available quota.'
+                    })
 
         if not getattr(self.provider, 'can_intra_' + provider_action)(self.dest_provider, self.path):
             # this weird signature syntax courtesy of py3.4 not liking trailing commas on kwargs

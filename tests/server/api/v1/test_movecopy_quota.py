@@ -238,7 +238,7 @@ class TestQuotaCheck:
         with pytest.raises(exceptions.NotEnoughQuotaError) as exc:
             await handler.move_or_copy()
 
-        assert exc.value.message == 'You do not have enough available quota.'
+        assert exc.value.data == {'message_key': 'quota_exceeded', 'message': 'You do not have enough available quota.'}
         _, dest_provider = mock_inter_osfstorage_quota_exceeded
         dest_provider.get_quota.assert_called_once_with()
 
