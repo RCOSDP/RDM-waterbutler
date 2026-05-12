@@ -12,6 +12,7 @@ from waterbutler.core.utils import make_provider
 from waterbutler.constants import DEFAULT_CONFLICT
 from waterbutler.auth.osf.handler import EXPORT_DATA_FAKE_NODE_ID
 from waterbutler.tasks.settings import SYNCHRONOUS_TIMEOUT
+from waterbutler.tasks.pre_checks import run_pre_checks
 
 auth_handler = AuthHandler(settings.AUTH_HANDLERS)
 
@@ -101,7 +102,7 @@ class MoveCopyMixin:
             self.auth['settings']
         )
         self.path = await self.provider.validate_v1_path(self.path, **self.arguments)
-
+        check_kwargs = {}
         if auth_action == 'rename':  # 'rename' implies the file/folder does not change location
             self.dest_auth = self.auth
             self.dest_provider = self.provider
@@ -149,31 +150,39 @@ class MoveCopyMixin:
             max_size_mb = self.dest_auth['settings'].get('max_file_size')
             max_size_bytes = (int(max_size_mb) * 1024 * 1024) if max_size_mb else None
 
-            data = await self.provider.metadata(self.path, version=None, revision=None, next_token=None)
-            if self.path.is_dir:
-                if data and isinstance(data[-1], str):
-                    data, token = self.provider.handle_data(data)
+            if not self.path.is_dir:
+                # Single-file path: read metadata once and check inline.
+                # No recursion needed — the item is guaranteed to be a file.
+                file_meta = await self.provider.metadata(
+                    self.path, version=None, revision=None
+                )
+                file_size = int(file_meta.size)
+
+                # Check max_file_size
+                if max_size_bytes and file_size > max_size_bytes:
+                    raise exceptions.InvalidParameters({
+                        'message': 'Move/Copy Failed due to oversized files.',
+                        'oversized_files': [{'name': file_meta.name, 'size': file_size}],
+                        'max_size': max_size_bytes,
+                    }, code=413)
+
+                # Check quota (osfstorage only)
+                if self.dest_provider.NAME == 'osfstorage':
+                    quota = await self.dest_provider.get_quota()
+                    if quota['used'] + file_size > quota['max']:
+                        raise exceptions.NotEnoughQuotaError({
+                            'message_key': 'quota_exceeded',
+                            'message': 'You do not have enough available quota.',
+                        })
+                check_kwargs = {
+                    'max_size_bytes': None,
+                    'check_quota': False,
+                }
             else:
-                data = [data]
-            oversized_files = await self.get_folder_info(data, max_size_bytes)
-
-            if oversized_files:
-                raise exceptions.InvalidParameters({
-                    'message': "Move/Copy Failed due to oversized files.",
-                    'oversized_files': oversized_files,
-                    'max_size': max_size_bytes
-                }, code=413)
-
-            # verify the quota if it is osfstorage
-            if self.dest_provider.NAME == 'osfstorage':
-                data = await self.provider.metadata(self.path, version=None, revision=None, next_token=None)
-                file_size = await self.get_file_size(data)
-                quota = await self.dest_provider.get_quota()
-                if quota['used'] + file_size > quota['max']:
-                    raise exceptions.NotEnoughQuotaError({
-                        'message_key': 'quota_exceeded',
-                        'message': 'You do not have enough available quota.'
-                    })
+                check_kwargs = {
+                    'max_size_bytes': max_size_bytes,
+                    'check_quota': (self.dest_provider.NAME == 'osfstorage'),
+                }
 
         if not getattr(self.provider, 'can_intra_' + provider_action)(self.dest_provider, self.path):
             # this weird signature syntax courtesy of py3.4 not liking trailing commas on kwargs
@@ -188,6 +197,7 @@ class MoveCopyMixin:
                 request=remote_logging._serialize_request(self.request),
                 *self.build_args(),
                 **task_kwargs,
+                **check_kwargs,
             )
             synchronous = self.json.get('synchronous', 'false')
             synchronous = True if isinstance(synchronous, bool) and synchronous is True else False
@@ -198,16 +208,21 @@ class MoveCopyMixin:
                 # Use default timeout value for asynchronous processes
                 metadata, created = await tasks.wait_on_celery(result)
         else:
-            metadata, created = (
-                await tasks.backgrounded(
-                    getattr(self.provider, provider_action),
+            async def _intra_task():
+                if self.path.is_dir:
+                    await run_pre_checks(
+                        self.provider, self.path, self.dest_provider,
+                        **check_kwargs
+                    )
+                return await getattr(self.provider, provider_action)(
                     self.dest_provider,
                     self.path,
                     self.dest_path,
                     rename=self.json.get('rename'),
                     conflict=self.json.get('conflict', DEFAULT_CONFLICT),
                 )
-            )
+
+            metadata, created = await tasks.backgrounded(_intra_task)
 
         self.dest_meta = metadata
 
@@ -217,47 +232,3 @@ class MoveCopyMixin:
             self.set_status(int(HTTPStatus.OK))
 
         self.write({'data': metadata.json_api_serialized(self.dest_resource)})
-
-    async def get_file_size(self, data):
-        size = 0
-        if not isinstance(data, list):
-            data = [data]
-        for x in data:
-            if x.kind == 'file':
-                size += int(x.size)
-            else:
-                child_path = await self.provider.validate_v1_path(x.path, **self.arguments)
-                data_child = await self.provider.metadata(child_path, version=None, revision=None, next_token=None)
-                if self.path.is_dir:
-                    if data_child and isinstance(data_child[-1], str):
-                        data_child, token = self.provider.handle_data(data_child)
-                else:
-                    data_child = [data_child]
-                size += await self.get_file_size(data_child)
-        return size
-
-    async def get_folder_info(self, data, max_size_bytes=None):
-        oversized = []
-        # Sort data to same as UI display order
-        sorted_data = sorted(data, key=lambda i: (0 if i.kind == 'folder' else 1, i.name.lower()))
-        for x in sorted_data:
-            if x.kind == 'file':
-                file_size = int(x.size)
-                if max_size_bytes and file_size > max_size_bytes:
-                    oversized.append({
-                        'name': x.name,
-                        'size': file_size
-                    })
-            else:
-                child_path = await self.provider.validate_v1_path(x.path, **self.arguments)
-                data_child = await self.provider.metadata(child_path, version=None, revision=None, next_token=None)
-                if self.path.is_dir:
-                    if data_child and isinstance(data_child[-1], str):
-                        data_child, token = self.provider.handle_data(data_child)
-                else:
-                    data_child = [data_child]
-
-                child_oversized = await self.get_folder_info(data_child, max_size_bytes)
-                oversized.extend(child_oversized)
-
-        return oversized

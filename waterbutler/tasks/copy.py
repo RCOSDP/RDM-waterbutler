@@ -5,12 +5,14 @@ from waterbutler.tasks import core
 from waterbutler.core.path import WaterButlerPath
 from waterbutler.core import utils, remote_logging
 from waterbutler.core.log_payload import LogPayload
+from waterbutler.tasks.pre_checks import run_pre_checks
 
 logger = logging.getLogger(__name__)
 
 
 @core.celery_task
-async def copy(src_bundle, dest_bundle, request=None, start_time=None, **kwargs):
+async def copy(src_bundle, dest_bundle, request=None, start_time=None,
+               max_size_bytes=None, check_quota=False, **kwargs):
 
     request = request or {}
     start_time = start_time or time.time()
@@ -26,6 +28,9 @@ async def copy(src_bundle, dest_bundle, request=None, start_time=None, **kwargs)
 
     metadata, errors = None, []
     try:
+        # Run pre-checks before attempting the copy to avoid partial copies and ensure we can report all errors at once
+        await run_pre_checks(src_provider, src_path, dest_provider,
+                             max_size_bytes=max_size_bytes, check_quota=check_quota)
         metadata, created = await src_provider.copy(dest_provider, src_path, dest_path, **kwargs)
     except Exception as e:
         logger.error('Copy failed with error {!r}'.format(e))
