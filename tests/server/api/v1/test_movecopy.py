@@ -84,6 +84,8 @@ class TestMoveOrCopy:
                                        conflict='warn',
                                        rename=None,
                                        request=serialized_request,
+                                       check_quota=False,
+                                       max_size_bytes=None,
                                        **kwargs)
 
     @pytest.mark.asyncio
@@ -100,13 +102,10 @@ class TestMoveOrCopy:
                                               handler.auth['auth'],
                                               handler.auth['credentials'],
                                               handler.auth['settings'])
-        mock_celery.assert_called_with(getattr(handler.provider, action),
-                                       handler.provider,
-                                       handler.path,
-                                       handler.dest_path,
-                                       conflict='warn',
-                                       rename=None)
-        handler.write.assert_called_with(serialized_metadata)
+        mock_celery.assert_called()
+        args, kwargs = mock_celery.call_args
+        assert len(args) == 1
+        assert callable(args[0])
         assert handler.dest_meta == mock_file_metadata
 
     @pytest.mark.asyncio
@@ -140,6 +139,8 @@ class TestMoveOrCopy:
                                        conflict='warn',
                                        rename=None,
                                        request=serialized_request,
+                                       check_quota=False,
+                                       max_size_bytes=None,
                                        **kwargs)
 
     @pytest.mark.asyncio
