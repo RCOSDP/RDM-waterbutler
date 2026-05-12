@@ -301,10 +301,10 @@ class TestQuotaCheck:
 
     @pytest.mark.asyncio
     async def test_move_or_copy_dir_metadata_with_pagination_token(self, http_request, monkeypatch, handler_auth):
-        """Covers: move_or_copy line 163-165.
+        """Covers: _fetch_children_with_pagination in move_or_copy.
         When path is a directory and provider.metadata returns data whose last element is
-        a string pagination token, handle_data must be called to strip the token before
-        passing the list to get_folder_info.
+        a string pagination token, handle_data is called to strip the token.
+        The loop continues with the returned token until a page with no token is returned.
         """
         import waterbutler.server.api.v1.provider.movecopy as movecopy_module
 
@@ -319,9 +319,12 @@ class TestQuotaCheck:
         mock_make_provider = mock.Mock(side_effect=[src_provider, dest_provider])
         monkeypatch.setattr(movecopy_module, 'make_provider', mock_make_provider)
 
-        # metadata returns a list where the last element is a pagination token (string)
+        # Page 1: ends with a string token → handle_data is called
+        # Page 2: no token → loop terminates
         paged_data = [file_meta, 'next_page_token']
-        src_provider.metadata = MockCoroutine(return_value=paged_data)
+        last_page  = [file_meta]   # no trailing token
+        src_provider.metadata = MockCoroutine(side_effect=[paged_data, last_page])
+        # handle_data strips the token from page 1 and signals there is a next page
         src_provider.handle_data = mock.Mock(return_value=([file_meta], 'next_page_token'))
 
         mock_adelay = MockCoroutine(return_value='celery-task-id')
@@ -330,13 +333,12 @@ class TestQuotaCheck:
                             MockCoroutine(return_value=(file_meta, True)))
 
         handler = mock_handler(http_request)
-        # '/test_folder/' ends with '/' → WaterButlerPath.is_dir == True
         handler.path = '/test_folder/'
         handler._json = {'action': 'copy', 'path': '/dest_folder/'}
 
         await handler.move_or_copy()
 
-        # handle_data must have been called to separate data from the token
+        # handle_data called exactly once (for page 1 only)
         src_provider.handle_data.assert_called_once_with(paged_data)
         handler.write.assert_called_once()
 
@@ -364,10 +366,15 @@ class TestGetFileSize:
 
     @pytest.mark.asyncio
     async def test_get_file_size_folder_containing_file(self, http_request):
-        """When self.path.is_dir is False the single metadata result is wrapped in a list."""
+        """Subfolder metadata returns a list of its children (always a list in production).
+        The child file's size is added to the total.
+        """
         handler = mock_handler(http_request)
-        handler.path = WaterButlerPath('/test_file')  # is_dir == False
-        handler.provider.metadata = MockCoroutine(return_value=MockFileMetadata())
+        file_meta = MockFileMetadata()
+        child_path = WaterButlerPath('/test_folder/sub/')
+        handler.provider.validate_v1_path = MockCoroutine(return_value=child_path)
+        # Folder metadata always returns a list in production
+        handler.provider.metadata = MockCoroutine(return_value=[file_meta])
 
         result = await handler.get_file_size([MockFolderMetadata()])
 
@@ -375,18 +382,27 @@ class TestGetFileSize:
 
     @pytest.mark.asyncio
     async def test_get_file_size_folder_metadata_with_token(self, http_request):
-        """When self.path.is_dir is True and metadata returns a list ending with a token,
-        handle_data is called to strip the token before recursing."""
+        """_fetch_children_with_pagination follows all pages.
+        Page 1 ends with a string token → handle_data strips it and returns the token.
+        Page 2 has no token → loop terminates.
+        Total size = one file per page * 2 pages.
+        """
         handler = mock_handler(http_request)
-        handler.path = WaterButlerPath('/test_folder/')  # is_dir == True
         file_meta = MockFileMetadata()
-        paged = [file_meta, 'next_token']
-        handler.provider.metadata = MockCoroutine(return_value=paged)
+        child_path = WaterButlerPath('/test_folder/sub/')
+
+        # Page 1: trailing token triggers handle_data; Page 2: no token → loop ends
+        paged     = [file_meta, 'next_token']
+        last_page = [file_meta]
+        handler.provider.validate_v1_path = MockCoroutine(return_value=child_path)
+        handler.provider.metadata = MockCoroutine(side_effect=[paged, last_page])
         handler.provider.handle_data = mock.Mock(return_value=([file_meta], 'next_token'))
 
         result = await handler.get_file_size([MockFolderMetadata()])
 
-        assert result == 1337
+        # Both pages contribute one file of size 1337 each
+        assert result == 1337 * 2
+        # handle_data called exactly once (page 1 only; page 2 had no token)
         handler.provider.handle_data.assert_called_once_with(paged)
 
 @pytest.mark.usefixtures('patch_auth_handler', 'patch_make_provider_move_copy')
@@ -426,12 +442,15 @@ class TestGetFolderInfo:
 
     @pytest.mark.asyncio
     async def test_get_folder_info_subfolder_with_oversized_file(self, http_request):
-        """Oversized files inside a subfolder are found through recursion."""
+        """Oversized files inside a subfolder are found through recursion.
+        Folder metadata always returns a list in production.
+        """
         handler = mock_handler(http_request)
-        # is_dir == False → data_child is wrapped: data_child = [metadata_object]
-        handler.path = WaterButlerPath('/test_file')
         file_meta = MockFileMetadata()
-        handler.provider.metadata = MockCoroutine(return_value=file_meta)
+        child_path = WaterButlerPath('/test_folder/sub/')
+        handler.provider.validate_v1_path = MockCoroutine(return_value=child_path)
+        # Folder metadata always returns a list in production
+        handler.provider.metadata = MockCoroutine(return_value=[file_meta])
         max_size_bytes = 1000  # 1000 < 1337
 
         # One folder (whose child is oversized) + one direct oversized file
@@ -442,24 +461,31 @@ class TestGetFolderInfo:
 
     @pytest.mark.asyncio
     async def test_get_folder_info_is_dir_with_token(self, http_request):
+        """_fetch_children_with_pagination follows all pages inside get_folder_info.
+        Page 1 ends with a pagination token → handle_data is called once.
+        Page 2 has no token → loop terminates.
+        Neither page contains an oversized file (max_size_bytes=2000 > 1337).
+        """
         handler = mock_handler(http_request)
-        handler.path = WaterButlerPath('/test_folder/')  # is_dir == True
 
-        # Mock folder metadata
         folder_meta = mock.Mock()
         folder_meta.kind = 'folder'
         folder_meta.name = 'folderA'
         folder_meta.path = '/test_folder/folderA/'
 
         file_meta = MockFileMetadata()
-        paged = [file_meta, 'next_token']
+        child_path = WaterButlerPath('/test_folder/folderA/')
 
-        # Patch provider
-        handler.provider.validate_v1_path = MockCoroutine(return_value='/test_folder/folderA/')
-        handler.provider.metadata = MockCoroutine(return_value=paged)
+        # Page 1: trailing token; Page 2: no token → terminates
+        paged     = [file_meta, 'next_token']
+        last_page = [file_meta]
+        handler.provider.validate_v1_path = MockCoroutine(return_value=child_path)
+        handler.provider.metadata = MockCoroutine(side_effect=[paged, last_page])
         handler.provider.handle_data = mock.Mock(return_value=([file_meta], 'next_token'))
 
         result = await handler.get_folder_info([folder_meta], max_size_bytes=2000)
 
+        # handle_data called exactly once (page 1 only)
         handler.provider.handle_data.assert_called_once_with(paged)
+        # Both pages: file size 1337 < max 2000 → no oversized files
         assert result == []

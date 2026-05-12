@@ -512,6 +512,11 @@ class TestIntraMoveCopy:
         dest_provider.validate_v1_path = utils.MockCoroutine()
         dest_provider._children_metadata = utils.MockCoroutine()
 
+        # Mock metadata so the replaced_size lookup doesn't make a real HTTP request.
+        dest_meta_mock = mock.Mock()
+        dest_meta_mock.size = 1234
+        dest_provider.metadata = utils.MockCoroutine(return_value=dest_meta_mock)
+
         src_path = WaterButlerPath('/test_file', _ids=['RootId', 'fileId'], folder=False)
         dest_path = WaterButlerPath('/folder1/test_file',
                                     _ids=['RootId', 'folder1Id', 'doomedFile'],
@@ -524,7 +529,8 @@ class TestIntraMoveCopy:
                 'name': dest_path.name,
                 'node': dest_provider.nid,
                 'parent': dest_path.parent.identifier
-            }
+            },
+            'replaced_size': 1234,
         })
 
         url, params = build_signed_url_without_auth(src_provider, 'POST', 'hooks', action,
@@ -1082,3 +1088,71 @@ class TestQuota:
 
         # Assert: Ensure delete was called on the destination path
         dest_provider.delete.assert_called_once_with(dest_path)
+
+    @pytest.mark.asyncio
+    async def test__do_intra_move_or_copy_metadata_exception_raises_provider_error(
+            self, provider_one, auth, credentials, settings_region_one):
+        """When dest_provider.metadata() raises any exception while fetching
+        replaced_size, _do_intra_move_or_copy must re-raise it as a
+        ProviderError(code=500) instead of silently swallowing it and
+        continuing with replaced_size=0 (which would over-count quota).
+        """
+        # Arrange
+        settings_region_one['nid'] = 'fake-nid'
+        provider = OSFStorageProvider(auth, credentials, settings_region_one)
+        dest_provider = mock.Mock()
+        dest_provider.nid = 'fake-nid'
+        dest_path = mock.Mock()
+        dest_path.identifier = 'some-id'  # triggers replaced_size branch
+        dest_path.name = 'file.txt'
+        dest_path.parent = mock.Mock()
+        dest_path.parent.identifier = 'parent-id'
+        src_path = mock.Mock()
+        src_path.identifier = 'src-id'
+
+        # metadata() raises an unexpected error (e.g. network failure)
+        dest_provider.metadata = utils.MockCoroutine(side_effect=Exception('network error'))
+        dest_provider.delete = utils.MockCoroutine()
+
+        provider.make_signed_request = utils.MockCoroutine()
+
+        # Act & Assert: ProviderError must be raised
+        with pytest.raises(exceptions.ProviderError) as exc_info:
+            await provider._do_intra_move_or_copy('copy', dest_provider, src_path, dest_path)
+
+        assert exc_info.value.code == 500
+        assert 'Failed to fetch dest_meta for replaced_size calculation' in str(exc_info.value.data)
+
+    @pytest.mark.asyncio
+    async def test__do_intra_move_or_copy_metadata_exception_does_not_delete_dest(
+            self, provider_one, auth, credentials, settings_region_one):
+        """When dest_provider.metadata() raises an exception, dest_provider.delete()
+        must NOT be called.  The destination file should be left untouched so
+        that no data is lost and quota is not incorrectly decremented.
+        """
+        # Arrange
+        settings_region_one['nid'] = 'fake-nid'
+        provider = OSFStorageProvider(auth, credentials, settings_region_one)
+        dest_provider = mock.Mock()
+        dest_provider.nid = 'fake-nid'
+        dest_path = mock.Mock()
+        dest_path.identifier = 'some-id'
+        dest_path.name = 'file.txt'
+        dest_path.parent = mock.Mock()
+        dest_path.parent.identifier = 'parent-id'
+        src_path = mock.Mock()
+        src_path.identifier = 'src-id'
+
+        dest_provider.metadata = utils.MockCoroutine(side_effect=Exception('timeout'))
+        dest_provider.delete = utils.MockCoroutine()
+
+        provider.make_signed_request = utils.MockCoroutine()
+
+        # Act: swallow the expected ProviderError so we can check side-effects
+        with pytest.raises(exceptions.ProviderError):
+            await provider._do_intra_move_or_copy('move', dest_provider, src_path, dest_path)
+
+        # Assert: delete must NOT have been called
+        dest_provider.delete.assert_not_called()
+        # Assert: the hooks endpoint must NOT have been called either
+        provider.make_signed_request.assert_not_called()

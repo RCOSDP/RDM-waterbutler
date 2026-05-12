@@ -149,12 +149,15 @@ class MoveCopyMixin:
             max_size_mb = self.dest_auth['settings'].get('max_file_size')
             max_size_bytes = (int(max_size_mb) * 1024 * 1024) if max_size_mb else None
 
-            data = await self.provider.metadata(self.path, version=None, revision=None, next_token=None)
             if self.path.is_dir:
-                if data and isinstance(data[-1], str):
-                    data, token = self.provider.handle_data(data)
+                # Fetch all children across all pages so that files beyond
+                # the first 1,000 are included in the pre-checks below.
+                # self.path is already validated — no extra HTTP call needed.
+                data = await self._fetch_children_with_pagination(self.path)
             else:
-                data = [data]
+                data = [await self.provider.metadata(
+                    self.path, version=None, revision=None
+                )]
             oversized_files = await self.get_folder_info(data, max_size_bytes)
 
             if oversized_files:
@@ -166,7 +169,6 @@ class MoveCopyMixin:
 
             # verify the quota if it is osfstorage
             if self.dest_provider.NAME == 'osfstorage':
-                data = await self.provider.metadata(self.path, version=None, revision=None, next_token=None)
                 file_size = await self.get_file_size(data)
                 quota = await self.dest_provider.get_quota()
                 if quota['used'] + file_size > quota['max']:
@@ -218,6 +220,37 @@ class MoveCopyMixin:
 
         self.write({'data': metadata.json_api_serialized(self.dest_resource)})
 
+    async def _fetch_children_with_pagination(self, path):
+        """Fetch all children of a folder, following pagination tokens.
+
+        Providers such as S3-compatible storage return results in pages
+        (up to 1 000 items per page). Calling metadata() with a fixed
+        ``next_token=None`` only retrieves the first page, causing files
+        beyond the 1 000-item boundary to be silently skipped during
+        quota/size pre-checks.  This helper loops until no more tokens
+        are returned, collecting every item across all pages.
+
+        :param WaterButlerPath path: already-validated path object for the folder.
+            The caller is responsible for validating the path before passing it in.
+        :returns list: flat list of all child metadata objects
+        """
+        all_data = []
+        next_token = None
+        while True:
+            data_child = await self.provider.metadata(
+                path, version=None, revision=None, next_token=next_token
+            )
+            # A paginated provider appends a string token as the last element of the list.
+            # Folder metadata always returns a list; if the last element is a string, strip it.
+            if data_child and isinstance(data_child[-1], str):
+                data_child, next_token = self.provider.handle_data(data_child)
+            else:
+                next_token = None
+            all_data.extend(data_child)
+            if not next_token:
+                break
+        return all_data
+
     async def get_file_size(self, data):
         size = 0
         if not isinstance(data, list):
@@ -227,12 +260,7 @@ class MoveCopyMixin:
                 size += int(x.size)
             else:
                 child_path = await self.provider.validate_v1_path(x.path, **self.arguments)
-                data_child = await self.provider.metadata(child_path, version=None, revision=None, next_token=None)
-                if self.path.is_dir:
-                    if data_child and isinstance(data_child[-1], str):
-                        data_child, token = self.provider.handle_data(data_child)
-                else:
-                    data_child = [data_child]
+                data_child = await self._fetch_children_with_pagination(child_path)
                 size += await self.get_file_size(data_child)
         return size
 
@@ -250,13 +278,7 @@ class MoveCopyMixin:
                     })
             else:
                 child_path = await self.provider.validate_v1_path(x.path, **self.arguments)
-                data_child = await self.provider.metadata(child_path, version=None, revision=None, next_token=None)
-                if self.path.is_dir:
-                    if data_child and isinstance(data_child[-1], str):
-                        data_child, token = self.provider.handle_data(data_child)
-                else:
-                    data_child = [data_child]
-
+                data_child = await self._fetch_children_with_pagination(child_path)
                 child_oversized = await self.get_folder_info(data_child, max_size_bytes)
                 oversized.extend(child_oversized)
 

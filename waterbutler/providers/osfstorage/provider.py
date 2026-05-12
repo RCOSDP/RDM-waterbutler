@@ -485,8 +485,9 @@ class OSFStorageProvider(provider.BaseProvider):
                 dest_meta = await dest_provider.metadata(dest_path)
                 if hasattr(dest_meta, 'size') and dest_meta.size:
                     replaced_size = int(dest_meta.size)
-            except Exception:
-                replaced_size = 0
+            except Exception as e:
+                logger.error('Failed to fetch dest_meta for replaced_size calculation: %s', e)
+                raise exceptions.ProviderError({'message': 'Failed to fetch dest_meta for replaced_size calculation.'}, code=500)
             await dest_provider.delete(dest_path)
 
         resp = await self.make_signed_request(
