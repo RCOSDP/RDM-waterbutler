@@ -2408,5 +2408,25 @@ class TestOperations:
         file_size = provider.FILE_SIZE_INTRA_COPY_LIMIT - 1
         assert provider.can_intra_move(provider, path=path, file_size=file_size) is True
 
+    def test_can_intra_copy_path_none(self, provider):
+        file_size = provider.FILE_SIZE_INTRA_COPY_LIMIT - 1
+        with pytest.raises(AttributeError):
+            provider.can_intra_copy(provider, path=None, file_size=file_size)
+
+    def test_can_intra_move_path_none(self, provider):
+        file_size = provider.FILE_SIZE_INTRA_COPY_LIMIT - 1
+        with pytest.raises(AttributeError):
+            provider.can_intra_move(provider, path=None, file_size=file_size)
+
+    def test_can_intra_copy_path_invalid_type(self, provider):
+        file_size = provider.FILE_SIZE_INTRA_COPY_LIMIT - 1
+        with pytest.raises(AttributeError):
+            provider.can_intra_copy(provider, path='not-a-path-object', file_size=file_size)
+
+    def test_can_intra_move_path_invalid_type(self, provider):
+        file_size = provider.FILE_SIZE_INTRA_COPY_LIMIT - 1
+        with pytest.raises(AttributeError):
+            provider.can_intra_move(provider, path='not-a-path-object', file_size=file_size)
+
     def test_can_duplicate_names(self, provider):
         assert provider.can_duplicate_names()
