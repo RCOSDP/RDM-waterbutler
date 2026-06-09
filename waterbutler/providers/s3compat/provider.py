@@ -90,6 +90,7 @@ class S3CompatProvider(provider.BaseProvider):
     * A GET prefix query against a non-existent path returns 200
     """
     NAME = 's3compat'
+    ACCEPTS_FILE_SIZE_FOR_INTRA = True
     CHUNK_SIZE = settings.CHUNK_SIZE
     CONTIGUOUS_UPLOAD_SIZE_LIMIT = settings.CONTIGUOUS_UPLOAD_SIZE_LIMIT
     FILE_SIZE_INTRA_COPY_LIMIT = settings.FILE_SIZE_INTRA_COPY_LIMIT
@@ -164,12 +165,12 @@ class S3CompatProvider(provider.BaseProvider):
     def can_intra_copy(self, dest_provider, path=None, file_size=None):
         if file_size is None or file_size > self.FILE_SIZE_INTRA_COPY_LIMIT:
             return False
-        return type(self) == type(dest_provider) and not getattr(path, 'is_dir', False)
+        return type(self) == type(dest_provider) and not path.is_dir
 
     def can_intra_move(self, dest_provider, path=None, file_size=None):
         if file_size is None or file_size > self.FILE_SIZE_INTRA_COPY_LIMIT:
             return False
-        return type(self) == type(dest_provider) and not getattr(path, 'is_dir', False)
+        return type(self) == type(dest_provider) and not path.is_dir
 
     async def intra_copy(self, dest_provider, source_path, dest_path):
         """Copy key from one S3 Compatible Storage bucket to another. The credentials specified in
