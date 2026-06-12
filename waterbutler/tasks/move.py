@@ -27,8 +27,6 @@ async def move(src_bundle, dest_bundle, request=None, start_time=None,
                 .format(src_path, src_provider, dest_path, dest_provider))
 
     metadata, errors = None, []
-    # Simulate a long-running task to test logging of long tasks and error handling in the UI
-    time.sleep(20)
     try:
         # Run pre-checks before attempting the move to avoid partial moves and ensure we can report all errors at once
         await run_pre_checks(src_provider, src_path, dest_provider,
