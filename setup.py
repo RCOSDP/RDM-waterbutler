@@ -62,6 +62,7 @@ setup(
             'azureblobstorage = waterbutler.providers.azureblobstorage:AzureBlobStorageProvider',
             'weko = waterbutler.providers.weko:WEKOProvider',
             's3compat = waterbutler.providers.s3compat:S3CompatProvider',
+            's3compatsigv4 = waterbutler.providers.s3compatsigv4:S3CompatSigV4Provider',
             's3compatb3 = waterbutler.providers.s3compatb3:S3CompatB3Provider',
             'nextcloud = waterbutler.providers.nextcloud:NextcloudProvider',
             'iqbrims = waterbutler.providers.iqbrims:IQBRIMSProvider',
