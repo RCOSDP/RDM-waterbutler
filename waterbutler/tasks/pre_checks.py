@@ -44,12 +44,47 @@ async def _get_oversized_files(provider, data, max_size_bytes):
     return oversized
 
 
-async def run_pre_checks(src_provider, src_path, dest_provider,
-                         max_size_bytes=None, check_quota=False):
-    """
-    Run max_file_size and quota pre-checks inside the Celery task.
-    Raises InvalidParameters (413) or NotEnoughQuotaError if checks fail.
-    """
+async def get_replaced_size(dest_provider, dest_container_path, resolved_name, conflict):
+    """Size of the existing file/folder being overwritten on replace, else 0."""
+    if conflict != 'replace' or dest_container_path is None:
+        return 0
+
+    children = await _fetch_all_pages(dest_provider, dest_container_path)
+    existing = next((child for child in children if child.name == resolved_name), None)
+    if existing is None:
+        return 0
+
+    if existing.kind == 'file':
+        return int(existing.size)
+
+    existing_path = await dest_provider.validate_path(existing.path)
+    existing_children = await _fetch_all_pages(dest_provider, existing_path)
+    return await _get_total_size(dest_provider, existing_children)
+
+
+async def evaluate_quota(operation, src_provider, dest_provider, file_size, replaced_size=0):
+    """Check destination quota, skipping moves within the same UserQuota record."""
+    dest_quota = await dest_provider.get_quota()
+
+    if operation == 'move':
+        src_quota = await src_provider.get_quota()
+        src_user_guid = src_quota.get('user_guid')
+        if (src_user_guid is not None and
+                src_user_guid == dest_quota.get('user_guid') and
+                src_quota.get('storage_type') == dest_quota.get('storage_type')):
+            return
+
+    if dest_quota['used'] + file_size - replaced_size > dest_quota['max']:
+        raise exceptions.NotEnoughQuotaError({
+            'message_key': 'quota_exceeded',
+            'message': 'You do not have enough available quota.',
+        })
+
+
+async def run_pre_checks(src_provider, src_path, dest_provider, dest_path=None,
+                         max_size_bytes=None, check_quota=False, operation=None,
+                         conflict='replace', rename=None):
+    """Run max_file_size and quota pre-checks inside the Celery task."""
     # Only fetch data once, reuse for both checks
     needs_check = max_size_bytes is not None or check_quota
     if not needs_check:
@@ -73,9 +108,7 @@ async def run_pre_checks(src_provider, src_path, dest_provider,
     # Check 2: quota
     if check_quota:
         file_size = await _get_total_size(src_provider, data)
-        quota = await dest_provider.get_quota()
-        if quota['used'] + file_size > quota['max']:
-            raise exceptions.NotEnoughQuotaError({
-                'message_key': 'quota_exceeded',
-                'message': 'You do not have enough available quota.',
-            })
+        resolved_name = rename or src_path.name
+        replaced_size = await get_replaced_size(dest_provider, dest_path, resolved_name, conflict)
+        await evaluate_quota(operation, src_provider, dest_provider, file_size,
+                             replaced_size=replaced_size)

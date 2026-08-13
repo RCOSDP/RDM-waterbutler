@@ -12,7 +12,7 @@ from waterbutler.core.utils import make_provider
 from waterbutler.constants import DEFAULT_CONFLICT
 from waterbutler.auth.osf.handler import EXPORT_DATA_FAKE_NODE_ID
 from waterbutler.tasks.settings import SYNCHRONOUS_TIMEOUT
-from waterbutler.tasks.pre_checks import run_pre_checks
+from waterbutler.tasks.pre_checks import run_pre_checks, evaluate_quota, get_replaced_size
 
 auth_handler = AuthHandler(settings.AUTH_HANDLERS)
 
@@ -108,6 +108,7 @@ class MoveCopyMixin:
             self.dest_provider = self.provider
             self.dest_path = self.path.parent
             self.dest_resource = self.resource
+            conflict = self.json.get('conflict', DEFAULT_CONFLICT)
         else:
             path = self.json.get('path', None)
             if path is None:
@@ -146,6 +147,8 @@ class MoveCopyMixin:
             )
             self.dest_path = await self.dest_provider.validate_path(**self.json)
 
+            conflict = self.json.get('conflict', DEFAULT_CONFLICT)
+
             # Check if the file/folder is oversized
             max_size_mb = self.dest_auth['settings'].get('max_file_size')
             max_size_bytes = (int(max_size_mb) * 1024 * 1024) if max_size_mb else None
@@ -168,12 +171,14 @@ class MoveCopyMixin:
 
                 # Check quota (osfstorage only)
                 if self.dest_provider.NAME == 'osfstorage':
-                    quota = await self.dest_provider.get_quota()
-                    if quota['used'] + file_size > quota['max']:
-                        raise exceptions.NotEnoughQuotaError({
-                            'message_key': 'quota_exceeded',
-                            'message': 'You do not have enough available quota.',
-                        })
+                    resolved_name = self.json.get('rename') or self.path.name
+                    replaced_size = await get_replaced_size(
+                        self.dest_provider, self.dest_path, resolved_name, conflict
+                    )
+                    await evaluate_quota(
+                        provider_action, self.provider, self.dest_provider,
+                        file_size, replaced_size=replaced_size
+                    )
                 check_kwargs = {
                     'max_size_bytes': None,
                     'check_quota': False,
@@ -212,6 +217,10 @@ class MoveCopyMixin:
                 if self.path.is_dir:
                     await run_pre_checks(
                         self.provider, self.path, self.dest_provider,
+                        dest_path=self.dest_path,
+                        operation=provider_action,
+                        conflict=conflict,
+                        rename=self.json.get('rename'),
                         **check_kwargs
                     )
                 return await getattr(self.provider, provider_action)(
@@ -219,7 +228,7 @@ class MoveCopyMixin:
                     self.path,
                     self.dest_path,
                     rename=self.json.get('rename'),
-                    conflict=self.json.get('conflict', DEFAULT_CONFLICT),
+                    conflict=conflict,
                 )
 
             metadata, created = await tasks.backgrounded(_intra_task)

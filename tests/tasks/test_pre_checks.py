@@ -14,7 +14,8 @@ move_module = sys.modules['waterbutler.tasks.move']
 
 from waterbutler.core import exceptions
 from waterbutler.core.path import WaterButlerPath
-from waterbutler.tasks.pre_checks import run_pre_checks
+from waterbutler.constants import DEFAULT_CONFLICT
+from waterbutler.tasks.pre_checks import run_pre_checks, get_replaced_size
 from tests.utils import MockCoroutine, MockFileMetadata, MockFolderMetadata, MockProvider
 
 # Retrieve the Celery tasks from the modules
@@ -296,6 +297,171 @@ class TestPreChecks:
 
         assert exc.value.data['message_key'] == 'quota_exceeded'
 
+    @pytest.mark.asyncio
+    async def test_move_same_user_quota_skips_quota_check_entirely(self, monkeypatch):
+        """Move sharing the same UserQuota record must skip the quota check, even if
+        used + file_size would otherwise exceed max."""
+        monkeypatch.setattr(time, 'sleep', lambda sec: None)
+        src_provider = MockProvider()
+        src_path = WaterButlerPath('/file.txt', prepend=None)
+        dest_provider = MockProvider()
+
+        file_meta = MockFileMetadataWithSize(600)
+        src_provider.metadata = MockCoroutine(return_value=file_meta)
+        src_provider.get_quota = MockCoroutine(return_value={'used': 500, 'max': 1000, 'user_guid': 'user-a', 'storage_type': 1})
+        dest_provider.get_quota = MockCoroutine(return_value={'used': 500, 'max': 1000, 'user_guid': 'user-a', 'storage_type': 1})
+
+        await run_pre_checks(
+            src_provider, src_path, dest_provider, check_quota=True, operation='move'
+        )
+        dest_provider.get_quota.assert_called_once_with()
+        src_provider.get_quota.assert_called_once_with()
+
+    @pytest.mark.asyncio
+    async def test_move_different_user_quota_still_checks_quota(self, monkeypatch):
+        """Move across different UserQuota records must still apply used+size>max."""
+        monkeypatch.setattr(time, 'sleep', lambda sec: None)
+        src_provider = MockProvider()
+        src_path = WaterButlerPath('/file.txt', prepend=None)
+        dest_provider = MockProvider()
+
+        file_meta = MockFileMetadataWithSize(600)
+        src_provider.metadata = MockCoroutine(return_value=file_meta)
+        src_provider.get_quota = MockCoroutine(return_value={'used': 0, 'max': 1000, 'user_guid': 'user-a', 'storage_type': 1})
+        dest_provider.get_quota = MockCoroutine(return_value={'used': 500, 'max': 1000, 'user_guid': 'user-b', 'storage_type': 1})
+
+        with pytest.raises(exceptions.NotEnoughQuotaError):
+            await run_pre_checks(
+                src_provider, src_path, dest_provider, check_quota=True, operation='move'
+            )
+
+    @pytest.mark.asyncio
+    async def test_copy_same_user_quota_still_checks_quota_and_does_not_fetch_src_quota(self, monkeypatch):
+        """Copy always creates new data, so it must NOT skip even when sharing the same UserQuota record,
+        and must not waste a call fetching the source's quota."""
+        monkeypatch.setattr(time, 'sleep', lambda sec: None)
+        src_provider = MockProvider()
+        src_path = WaterButlerPath('/file.txt', prepend=None)
+        dest_provider = MockProvider()
+
+        file_meta = MockFileMetadataWithSize(600)
+        src_provider.metadata = MockCoroutine(return_value=file_meta)
+        src_provider.get_quota = MockCoroutine(return_value={'used': 0, 'max': 1000, 'user_guid': 'user-a', 'storage_type': 1})
+        dest_provider.get_quota = MockCoroutine(return_value={'used': 500, 'max': 1000, 'user_guid': 'user-a', 'storage_type': 1})
+
+        with pytest.raises(exceptions.NotEnoughQuotaError):
+            await run_pre_checks(
+                src_provider, src_path, dest_provider, check_quota=True, operation='copy'
+            )
+        src_provider.get_quota.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_get_replaced_size_zero_when_conflict_not_replace(self, monkeypatch):
+        """conflict='keep' (or anything but 'replace') never subtracts anything, even if a
+        same-named item exists at the destination — nothing is actually being overwritten."""
+        monkeypatch.setattr(time, 'sleep', lambda sec: None)
+        dest_provider = MockProvider()
+        dest_container_path = WaterButlerPath('/dest/', prepend=None)
+        dest_provider.metadata = MockCoroutine(return_value=[MockFileMetadataWithSize(999, name='Foo.txt')])
+
+        size = await get_replaced_size(dest_provider, dest_container_path, 'Foo.txt', 'keep')
+
+        assert size == 0
+        dest_provider.metadata.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_get_replaced_size_zero_when_no_matching_child(self, monkeypatch):
+        """conflict='replace' but nothing at the destination shares the incoming name -> 0."""
+        monkeypatch.setattr(time, 'sleep', lambda sec: None)
+        dest_provider = MockProvider()
+        dest_container_path = WaterButlerPath('/dest/', prepend=None)
+        dest_provider.metadata = MockCoroutine(return_value=[MockFileMetadataWithSize(999, name='Other.txt')])
+
+        size = await get_replaced_size(dest_provider, dest_container_path, 'Foo.txt', 'replace')
+
+        assert size == 0
+
+    @pytest.mark.asyncio
+    async def test_get_replaced_size_matches_file_by_name(self, monkeypatch):
+        """conflict='replace' with a matching file at the destination -> that file's size."""
+        monkeypatch.setattr(time, 'sleep', lambda sec: None)
+        dest_provider = MockProvider()
+        dest_container_path = WaterButlerPath('/dest/', prepend=None)
+        dest_provider.metadata = MockCoroutine(return_value=[
+            MockFileMetadataWithSize(999, name='Other.txt'),
+            MockFileMetadataWithSize(500, name='Foo.txt'),
+        ])
+
+        size = await get_replaced_size(dest_provider, dest_container_path, 'Foo.txt', 'replace')
+
+        assert size == 500
+
+    @pytest.mark.asyncio
+    async def test_get_replaced_size_sums_matching_folder_recursively(self, monkeypatch):
+        """conflict='replace' with a matching FOLDER at the destination -> sum of everything
+        inside it, recursively — this is the folder-replace gap the customer flagged."""
+        monkeypatch.setattr(time, 'sleep', lambda sec: None)
+        dest_provider = MockProvider()
+        dest_container_path = WaterButlerPath('/dest/', prepend=None)
+        existing_folder = MockFolderMetadataWithName(name='Foo', path='/dest/Foo/')
+        existing_folder_path = WaterButlerPath('/dest/Foo/', prepend=None)
+
+        dest_provider.metadata = MockCoroutine(side_effect=[
+            [MockFileMetadataWithSize(999, name='Other.txt'), existing_folder],   # listing dest_container_path
+            [MockFileMetadataWithSize(300, name='a.txt'), MockFileMetadataWithSize(200, name='b.txt')],
+        ])
+        dest_provider.validate_path = MockCoroutine(return_value=existing_folder_path)
+
+        size = await get_replaced_size(dest_provider, dest_container_path, 'Foo', 'replace')
+
+        assert size == 500
+        dest_provider.validate_path.assert_called_once_with('/dest/Foo/')
+
+    @pytest.mark.asyncio
+    async def test_folder_pre_check_quota_subtracts_replaced_folder_size(self, monkeypatch):
+        """run_pre_checks on a folder replace must subtract the existing destination folder's
+        total size, not just check used + new_size blindly (the customer's 'yêu cầu bổ sung')."""
+        monkeypatch.setattr(time, 'sleep', lambda sec: None)
+        src_provider = MockProvider()
+        src_path = WaterButlerPath('/src_folder/', prepend=None)
+        dest_provider = MockProvider()
+        dest_container_path = WaterButlerPath('/dest/', prepend=None)
+        existing_folder = MockFolderMetadataWithName(name='src_folder', path='/dest/src_folder/')
+        existing_folder_path = WaterButlerPath('/dest/src_folder/', prepend=None)
+
+        src_provider.metadata = MockCoroutine(return_value=[MockFileMetadataWithSize(600, name='new.txt')])
+        dest_provider.metadata = MockCoroutine(side_effect=[
+            [existing_folder],                                     # listing dest_container_path
+            [MockFileMetadataWithSize(500, name='old.txt')],        # listing existing_folder's children
+        ])
+        dest_provider.validate_path = MockCoroutine(return_value=existing_folder_path)
+        dest_provider.get_quota = MockCoroutine(return_value={'used': 900, 'max': 1000, 'user_guid': 'user-b', 'storage_type': 1})
+        src_provider.get_quota = MockCoroutine(return_value={'used': 0, 'max': 1000, 'user_guid': 'user-a', 'storage_type': 1})
+
+        # 900 (used) + 600 (new folder) - 500 (existing folder being replaced) = 1000, not > 1000 -> must pass
+        await run_pre_checks(
+            src_provider, src_path, dest_provider, dest_path=dest_container_path,
+            check_quota=True, operation='copy', conflict='replace'
+        )
+
+    @pytest.mark.asyncio
+    async def test_folder_pre_check_quota_ignores_replace_when_no_dest_path(self, monkeypatch):
+        """Callers that don't pass dest_path (none currently do, until Task 4/5) keep today's
+        behavior exactly — replaced_size is 0, no extra metadata calls happen."""
+        monkeypatch.setattr(time, 'sleep', lambda sec: None)
+        src_provider = MockProvider()
+        src_path = WaterButlerPath('/src_folder/', prepend=None)
+        dest_provider = MockProvider()
+
+        src_provider.metadata = MockCoroutine(return_value=[MockFileMetadataWithSize(100, name='new.txt')])
+        dest_provider.get_quota = MockCoroutine(return_value={'used': 500, 'max': 1000, 'user_guid': 'user-b', 'storage_type': 1})
+        src_provider.get_quota = MockCoroutine(return_value={'used': 0, 'max': 1000, 'user_guid': 'user-a', 'storage_type': 1})
+
+        await run_pre_checks(
+            src_provider, src_path, dest_provider, check_quota=True, operation='copy'
+        )
+        dest_provider.metadata.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # Celery Task Integration Tests
@@ -320,8 +486,12 @@ class TestPreChecksTaskIntegration:
 
         mock_run_pre_checks.assert_called_once_with(
             src, src_bundle['path'], dest,
+            dest_path=dest_bundle['path'],
             max_size_bytes=1000,
-            check_quota=True
+            check_quota=True,
+            operation='copy',
+            conflict=DEFAULT_CONFLICT,
+            rename=None
         )
         assert src.copy.called
 
@@ -344,10 +514,42 @@ class TestPreChecksTaskIntegration:
 
         mock_run_pre_checks.assert_called_once_with(
             src, src_bundle['path'], dest,
+            dest_path=dest_bundle['path'],
             max_size_bytes=1000,
-            check_quota=True
+            check_quota=True,
+            operation='move',
+            conflict=DEFAULT_CONFLICT,
+            rename=None
         )
         assert src.move.called
+
+    def test_copy_task_forwards_conflict_and_rename_to_pre_checks(self, monkeypatch, providers, bundles, callback):
+        """conflict/rename passed to the celery task (e.g. from an explicit replace request)
+        must reach run_pre_checks unchanged, not just the defaults."""
+        src, dest = providers
+        src_bundle, dest_bundle = bundles
+
+        mock_run_pre_checks = MockCoroutine()
+        monkeypatch.setattr(copy_module, 'run_pre_checks', mock_run_pre_checks)
+
+        copy_task(
+            cp.deepcopy(src_bundle),
+            cp.deepcopy(dest_bundle),
+            max_size_bytes=1000,
+            check_quota=True,
+            conflict='replace',
+            rename='renamed.txt'
+        )
+
+        mock_run_pre_checks.assert_called_once_with(
+            src, src_bundle['path'], dest,
+            dest_path=dest_bundle['path'],
+            max_size_bytes=1000,
+            check_quota=True,
+            operation='copy',
+            conflict='replace',
+            rename='renamed.txt'
+        )
 
     def test_copy_task_pre_checks_failure_aborts_copy(self, monkeypatch, providers, bundles, callback):
         """Copy task should abort and raise if pre-checks raise InvalidParameters."""
