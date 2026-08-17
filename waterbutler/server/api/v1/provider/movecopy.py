@@ -12,7 +12,9 @@ from waterbutler.core.utils import make_provider
 from waterbutler.constants import DEFAULT_CONFLICT
 from waterbutler.auth.osf.handler import EXPORT_DATA_FAKE_NODE_ID
 from waterbutler.tasks.settings import SYNCHRONOUS_TIMEOUT
-from waterbutler.tasks.pre_checks import run_pre_checks, evaluate_quota, get_replaced_size
+from waterbutler.tasks.pre_checks import (
+    run_pre_checks, get_replaced_size, resolve_quota_context, check_quota_limit,
+)
 
 auth_handler = AuthHandler(settings.AUTH_HANDLERS)
 
@@ -171,14 +173,15 @@ class MoveCopyMixin:
 
                 # Check quota (osfstorage only)
                 if self.dest_provider.NAME == 'osfstorage':
-                    resolved_name = self.json.get('rename') or self.path.name
-                    replaced_size = await get_replaced_size(
-                        self.dest_provider, self.dest_path, resolved_name, conflict
+                    skip, dest_quota = await resolve_quota_context(
+                        provider_action, self.provider, self.dest_provider
                     )
-                    await evaluate_quota(
-                        provider_action, self.provider, self.dest_provider,
-                        file_size, replaced_size=replaced_size
-                    )
+                    if not skip:
+                        resolved_name = self.json.get('rename') or self.path.name
+                        replaced_size = await get_replaced_size(
+                            self.dest_provider, self.dest_path, resolved_name, conflict
+                        )
+                        check_quota_limit(dest_quota, file_size, replaced_size)
                 check_kwargs = {
                     'max_size_bytes': None,
                     'check_quota': False,

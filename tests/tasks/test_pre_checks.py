@@ -15,7 +15,8 @@ move_module = sys.modules['waterbutler.tasks.move']
 from waterbutler.core import exceptions
 from waterbutler.core.path import WaterButlerPath
 from waterbutler.constants import DEFAULT_CONFLICT
-from waterbutler.tasks.pre_checks import run_pre_checks, get_replaced_size
+from waterbutler.tasks import pre_checks as pre_checks_module
+from waterbutler.tasks.pre_checks import run_pre_checks, get_replaced_size, evaluate_quota
 from tests.utils import MockCoroutine, MockFileMetadata, MockFolderMetadata, MockProvider
 
 # Retrieve the Celery tasks from the modules
@@ -307,6 +308,7 @@ class TestPreChecks:
         dest_provider = MockProvider()
 
         file_meta = MockFileMetadataWithSize(600)
+        src_provider.NAME = 'osfstorage'
         src_provider.metadata = MockCoroutine(return_value=file_meta)
         src_provider.get_quota = MockCoroutine(return_value={'used': 500, 'max': 1000, 'user_guid': 'user-a', 'storage_type': 1})
         dest_provider.get_quota = MockCoroutine(return_value={'used': 500, 'max': 1000, 'user_guid': 'user-a', 'storage_type': 1})
@@ -316,6 +318,29 @@ class TestPreChecks:
         )
         dest_provider.get_quota.assert_called_once_with()
         src_provider.get_quota.assert_called_once_with()
+
+    @pytest.mark.asyncio
+    async def test_move_from_non_osfstorage_src_skips_src_quota_fetch(self, monkeypatch):
+        """Moving from a non-osfstorage provider (e.g. Dropbox) into osfstorage must never call
+        src_provider.get_quota() — non-osfstorage providers have no `nid`, so that call would
+        build a bad URL and blow up. Only the destination quota should be checked."""
+        monkeypatch.setattr(time, 'sleep', lambda sec: None)
+        src_provider = MockProvider()  # NAME == 'MockProvider', not 'osfstorage'
+        src_path = WaterButlerPath('/file.txt', prepend=None)
+        dest_provider = MockProvider()
+
+        file_meta = MockFileMetadataWithSize(100)
+        src_provider.metadata = MockCoroutine(return_value=file_meta)
+        src_provider.get_quota = MockCoroutine(
+            side_effect=AssertionError('src_provider.get_quota() must not be called for non-osfstorage src')
+        )
+        dest_provider.get_quota = MockCoroutine(return_value={'used': 500, 'max': 1000})
+
+        await run_pre_checks(
+            src_provider, src_path, dest_provider, check_quota=True, operation='move'
+        )
+        dest_provider.get_quota.assert_called_once_with()
+        src_provider.get_quota.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_move_different_user_quota_still_checks_quota(self, monkeypatch):
@@ -461,6 +486,77 @@ class TestPreChecks:
             src_provider, src_path, dest_provider, check_quota=True, operation='copy'
         )
         dest_provider.metadata.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_move_same_user_quota_does_not_walk_source_tree(self, monkeypatch):
+        """D.7: when the move stays within one UserQuota record, run_pre_checks must bail
+        out of the quota check BEFORE recursing into the source folder tree — the size
+        would only be discarded by evaluate_quota()'s skip anyway."""
+        monkeypatch.setattr(time, 'sleep', lambda sec: None)
+        src_provider = MockProvider()
+        src_path = WaterButlerPath('/folder/', prepend=None)
+        dest_provider = MockProvider()
+
+        subfolder = MockFolderMetadataWithName(name='subfolder', path='/folder/subfolder/')
+        src_provider.NAME = 'osfstorage'
+        # Top-level listing (always fetched) contains a subfolder; validate_path/further
+        # metadata calls are only reached by the recursive _get_total_size() walk.
+        src_provider.metadata = MockCoroutine(return_value=[subfolder])
+        src_provider.validate_path = MockCoroutine(
+            side_effect=AssertionError('source tree must not be walked when quota check is skipped')
+        )
+        src_provider.get_quota = MockCoroutine(return_value={'used': 500, 'max': 1000, 'user_guid': 'user-a', 'storage_type': 1})
+        dest_provider.get_quota = MockCoroutine(return_value={'used': 500, 'max': 1000, 'user_guid': 'user-a', 'storage_type': 1})
+
+        await run_pre_checks(
+            src_provider, src_path, dest_provider, check_quota=True, operation='move'
+        )
+        src_provider.validate_path.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_move_same_user_quota_does_not_look_up_replaced_item(self, monkeypatch):
+        """D.7: same-UserQuota-record moves must also skip get_replaced_size() — there is
+        no destination lookup to make when the check itself will be skipped."""
+        monkeypatch.setattr(time, 'sleep', lambda sec: None)
+        src_provider = MockProvider()
+        src_path = WaterButlerPath('/file.txt', prepend=None)
+        dest_provider = MockProvider()
+
+        file_meta = MockFileMetadataWithSize(600)
+        src_provider.NAME = 'osfstorage'
+        src_provider.metadata = MockCoroutine(return_value=file_meta)
+        src_provider.get_quota = MockCoroutine(return_value={'used': 500, 'max': 1000, 'user_guid': 'user-a', 'storage_type': 1})
+        dest_provider.get_quota = MockCoroutine(return_value={'used': 500, 'max': 1000, 'user_guid': 'user-a', 'storage_type': 1})
+
+        mock_get_replaced_size = MockCoroutine()
+        monkeypatch.setattr(pre_checks_module, 'get_replaced_size', mock_get_replaced_size)
+
+        await run_pre_checks(
+            src_provider, src_path, dest_provider, dest_path=WaterButlerPath('/dest/', prepend=None),
+            check_quota=True, operation='move', conflict='replace'
+        )
+        mock_get_replaced_size.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_evaluate_quota_wrapper_still_skips_and_raises(self, monkeypatch):
+        """D.7: evaluate_quota() has no remaining caller in this codebase after the split
+        into resolve_quota_context()/check_quota_limit(), but it is kept as a public
+        convenience wrapper -- this protects its contract for any caller outside this repo."""
+        monkeypatch.setattr(time, 'sleep', lambda sec: None)
+        src_provider = MockProvider()
+        dest_provider = MockProvider()
+
+        # Same UserQuota record: must not raise even though used + file_size > max.
+        src_provider.NAME = 'osfstorage'
+        src_provider.get_quota = MockCoroutine(return_value={'used': 900, 'max': 1000, 'user_guid': 'user-a', 'storage_type': 1})
+        dest_provider.get_quota = MockCoroutine(return_value={'used': 900, 'max': 1000, 'user_guid': 'user-a', 'storage_type': 1})
+        await evaluate_quota('move', src_provider, dest_provider, 600)
+
+        # Different UserQuota record: must raise when the limit is actually exceeded.
+        dest_provider.get_quota = MockCoroutine(return_value={'used': 900, 'max': 1000, 'user_guid': 'user-b', 'storage_type': 1})
+        with pytest.raises(exceptions.NotEnoughQuotaError) as exc:
+            await evaluate_quota('move', src_provider, dest_provider, 600)
+        assert exc.value.data['message_key'] == 'quota_exceeded'
 
 
 # ---------------------------------------------------------------------------

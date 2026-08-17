@@ -62,23 +62,51 @@ async def get_replaced_size(dest_provider, dest_container_path, resolved_name, c
     return await _get_total_size(dest_provider, existing_children)
 
 
-async def evaluate_quota(operation, src_provider, dest_provider, file_size, replaced_size=0):
-    """Check destination quota, skipping moves within the same UserQuota record."""
+async def resolve_quota_context(operation, src_provider, dest_provider):
+    """Fetch the destination quota and decide whether the check can be skipped outright.
+
+    Returns ``(skip, dest_quota)``. When ``skip`` is True the operation stays inside one
+    UserQuota record, so ``used`` cannot grow and no size needs to be computed at all --
+    callers should bail out *before* walking the source tree or looking up the item being
+    replaced, both of which evaluate_quota() would otherwise discard.
+
+    ``dest_quota`` is returned so callers can hand it straight to check_quota_limit()
+    instead of re-fetching it; this keeps the number of creator_quota requests identical
+    to the previous single-function implementation.
+    """
     dest_quota = await dest_provider.get_quota()
 
-    if operation == 'move':
+    if operation == 'move' and src_provider.NAME == 'osfstorage':
         src_quota = await src_provider.get_quota()
         src_user_guid = src_quota.get('user_guid')
         if (src_user_guid is not None and
                 src_user_guid == dest_quota.get('user_guid') and
                 src_quota.get('storage_type') == dest_quota.get('storage_type')):
-            return
+            return True, dest_quota
 
+    return False, dest_quota
+
+
+def check_quota_limit(dest_quota, file_size, replaced_size=0):
+    """Raise NotEnoughQuotaError when the operation would push `used` past `max`."""
     if dest_quota['used'] + file_size - replaced_size > dest_quota['max']:
         raise exceptions.NotEnoughQuotaError({
             'message_key': 'quota_exceeded',
             'message': 'You do not have enough available quota.',
         })
+
+
+async def evaluate_quota(operation, src_provider, dest_provider, file_size, replaced_size=0):
+    """Check destination quota, skipping moves within the same UserQuota record.
+
+    Convenience wrapper for callers that already know both sizes. Callers that would have
+    to do expensive work to learn them should call resolve_quota_context() first and bail
+    out on skip, then call check_quota_limit() directly.
+    """
+    skip, dest_quota = await resolve_quota_context(operation, src_provider, dest_provider)
+    if skip:
+        return
+    check_quota_limit(dest_quota, file_size, replaced_size)
 
 
 async def run_pre_checks(src_provider, src_path, dest_provider, dest_path=None,
@@ -107,8 +135,10 @@ async def run_pre_checks(src_provider, src_path, dest_provider, dest_path=None,
 
     # Check 2: quota
     if check_quota:
-        file_size = await _get_total_size(src_provider, data)
-        resolved_name = rename or src_path.name
-        replaced_size = await get_replaced_size(dest_provider, dest_path, resolved_name, conflict)
-        await evaluate_quota(operation, src_provider, dest_provider, file_size,
-                             replaced_size=replaced_size)
+        skip, dest_quota = await resolve_quota_context(operation, src_provider, dest_provider)
+        if not skip:
+            file_size = await _get_total_size(src_provider, data)
+            resolved_name = rename or src_path.name
+            replaced_size = await get_replaced_size(dest_provider, dest_path,
+                                                    resolved_name, conflict)
+            check_quota_limit(dest_quota, file_size, replaced_size)
