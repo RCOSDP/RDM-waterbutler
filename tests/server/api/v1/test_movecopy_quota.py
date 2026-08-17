@@ -482,7 +482,7 @@ class TestQuotaCheck:
         even when used + file_size would exceed max."""
         import waterbutler.server.api.v1.provider.movecopy as movecopy_module
 
-        src_provider = MockProvider()
+        src_provider = MockOsfStorageProvider()
         dest_provider = MockOsfStorageProvider()
         file_meta = MockFileMetadataWithSize(600)
         src_provider.metadata = MockCoroutine(return_value=file_meta)
