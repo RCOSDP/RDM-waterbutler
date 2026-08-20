@@ -35,7 +35,8 @@ async def move(src_bundle, dest_bundle, request=None, start_time=None,
                              max_size_bytes=max_size_bytes, check_quota=check_quota,
                              operation='move',
                              conflict=kwargs.get('conflict', DEFAULT_CONFLICT),
-                             rename=kwargs.get('rename'))
+                             rename=kwargs.get('rename'),
+                             src_nid=src_bundle['nid'], dest_nid=dest_bundle['nid'])
         metadata, created = await src_provider.move(dest_provider, src_path, dest_path, **kwargs)
     except Exception as e:
         logger.error('Move failed with error {!r}'.format(e))

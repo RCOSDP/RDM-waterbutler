@@ -14,6 +14,7 @@ from waterbutler.auth.osf.handler import EXPORT_DATA_FAKE_NODE_ID
 from waterbutler.tasks.settings import SYNCHRONOUS_TIMEOUT
 from waterbutler.tasks.pre_checks import (
     run_pre_checks, get_replaced_size, resolve_quota_context, check_quota_limit,
+    should_skip_size_check,
 )
 
 auth_handler = AuthHandler(settings.AUTH_HANDLERS)
@@ -163,8 +164,16 @@ class MoveCopyMixin:
                 )
                 file_size = int(file_meta.size)
 
-                # Check max_file_size
-                if max_size_bytes and file_size > max_size_bytes:
+                # max_file_size and quota are skipped on two different, independent
+                # conditions -- see should_skip_size_check() and resolve_quota_context().
+                run_size_check = max_size_bytes is not None and not should_skip_size_check(
+                    provider_action, self.provider, self.dest_provider,
+                    self.resource, self.dest_resource
+                )
+
+                # Check max_file_size first -- quota is fetched only after this check
+                # passes, so an oversized file never triggers a creator_quota request.
+                if run_size_check and file_size > max_size_bytes:
                     raise exceptions.InvalidParameters({
                         'message': 'Move/Copy Failed due to oversized files.',
                         'oversized_files': [{'name': file_meta.name, 'size': file_size}],
@@ -173,13 +182,13 @@ class MoveCopyMixin:
 
                 # Check quota (osfstorage only)
                 if self.dest_provider.NAME == 'osfstorage':
-                    skip, dest_quota = await resolve_quota_context(
+                    skip_quota, dest_quota = await resolve_quota_context(
                         provider_action, self.provider, self.dest_provider
                     )
-                    if not skip:
+                    if not skip_quota:
                         resolved_name = self.json.get('rename') or self.path.name
                         replaced_size = await get_replaced_size(
-                            self.dest_provider, self.dest_path, resolved_name, conflict
+                            self.dest_provider, self.dest_path, resolved_name, conflict, 'file'
                         )
                         check_quota_limit(dest_quota, file_size, replaced_size)
                 check_kwargs = {
@@ -224,6 +233,7 @@ class MoveCopyMixin:
                         operation=provider_action,
                         conflict=conflict,
                         rename=self.json.get('rename'),
+                        src_nid=self.resource, dest_nid=self.dest_resource,
                         **check_kwargs
                     )
                 return await getattr(self.provider, provider_action)(

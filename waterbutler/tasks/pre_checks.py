@@ -44,13 +44,22 @@ async def _get_oversized_files(provider, data, max_size_bytes):
     return oversized
 
 
-async def get_replaced_size(dest_provider, dest_container_path, resolved_name, conflict):
-    """Size of the existing file/folder being overwritten on replace, else 0."""
+async def get_replaced_size(dest_provider, dest_container_path, resolved_name, conflict,
+                            src_kind):
+    """Size of the existing file/folder being overwritten on replace, else 0.
+
+    ``src_kind`` is the kind ('file' or 'folder') of the item being moved/copied. Only a
+    destination child of that same kind is actually overwritten: osfstorage allows a file
+    and a folder to share one name (``can_duplicate_names()`` is True), so matching on the
+    name alone would subtract the size of an item that survives the operation and let the
+    user push ``used`` past ``max``.
+    """
     if conflict != 'replace' or dest_container_path is None:
         return 0
 
     children = await _fetch_all_pages(dest_provider, dest_container_path)
-    existing = next((child for child in children if child.name == resolved_name), None)
+    existing = next((child for child in children
+                     if child.name == resolved_name and child.kind == src_kind), None)
     if existing is None:
         return 0
 
@@ -68,7 +77,7 @@ async def resolve_quota_context(operation, src_provider, dest_provider):
     Returns ``(skip, dest_quota)``. When ``skip`` is True the operation stays inside one
     UserQuota record, so ``used`` cannot grow and no size needs to be computed at all --
     callers should bail out *before* walking the source tree or looking up the item being
-    replaced, both of which evaluate_quota() would otherwise discard.
+    replaced, since neither result would change the outcome.
 
     ``dest_quota`` is returned so callers can hand it straight to check_quota_limit()
     instead of re-fetching it; this keeps the number of creator_quota requests identical
@@ -96,35 +105,50 @@ def check_quota_limit(dest_quota, file_size, replaced_size=0):
         })
 
 
-async def evaluate_quota(operation, src_provider, dest_provider, file_size, replaced_size=0):
-    """Check destination quota, skipping moves within the same UserQuota record.
+def should_skip_size_check(operation, src_provider, dest_provider, src_nid, dest_nid):
+    """True when a move stays within the same storage and location (size can't change).
 
-    Convenience wrapper for callers that already know both sizes. Callers that would have
-    to do expensive work to learn them should call resolve_quota_context() first and bail
-    out on skip, then call check_quota_limit() directly.
+    For osfstorage, "same location" means same region (``is_same_region()``), since a
+    same-region move never changes which bucket holds the data. Other providers fall back
+    to node-match via the caller-supplied ``src_nid``/``dest_nid`` -- not ``provider.nid``,
+    which is usually ``None`` on both sides and would wrongly match every cross-project move.
+
+    Independent from resolve_quota_context()'s skip: the two can diverge (e.g. different
+    creator keeps this skip but not quota's; cross-region keeps quota's skip but not this).
     """
-    skip, dest_quota = await resolve_quota_context(operation, src_provider, dest_provider)
-    if skip:
-        return
-    check_quota_limit(dest_quota, file_size, replaced_size)
+    if operation != 'move' or src_provider.NAME != dest_provider.NAME:
+        return False
+    if src_provider.NAME == 'osfstorage':
+        return src_provider.is_same_region(dest_provider)
+    return src_nid == dest_nid
 
 
 async def run_pre_checks(src_provider, src_path, dest_provider, dest_path=None,
                          max_size_bytes=None, check_quota=False, operation=None,
-                         conflict='replace', rename=None):
-    """Run max_file_size and quota pre-checks inside the Celery task."""
-    # Only fetch data once, reuse for both checks
-    needs_check = max_size_bytes is not None or check_quota
-    if not needs_check:
+                         conflict='replace', rename=None, src_nid=None, dest_nid=None):
+    """Run max_file_size and quota pre-checks inside the Celery task.
+
+    The two checks have independent skip conditions: see should_skip_size_check() and
+    resolve_quota_context(). The quota check (and its creator_quota fetch) is deferred
+    until *after* the max_file_size check has run and passed, so an oversized file is
+    rejected with 413 without ever calling creator_quota.
+    """
+    run_size_check = max_size_bytes is not None and not should_skip_size_check(
+        operation, src_provider, dest_provider, src_nid, dest_nid)
+
+    if not run_size_check and not check_quota:
         return
 
-    if src_path.is_dir:
-        data = await _fetch_all_pages(src_provider, src_path)
-    else:
-        data = [await src_provider.metadata(src_path, version=None, revision=None)]
+    data = None
 
-    # Check 1: max file size
-    if max_size_bytes is not None:
+    # Check 1: max file size. Only fetches source data when the check actually applies,
+    # so a same-storage/same-project move that also skips quota never walks the tree.
+    if run_size_check:
+        if src_path.is_dir:
+            data = await _fetch_all_pages(src_provider, src_path)
+        else:
+            data = [await src_provider.metadata(src_path, version=None, revision=None)]
+
         oversized = await _get_oversized_files(src_provider, data, max_size_bytes)
         if oversized:
             raise exceptions.InvalidParameters({
@@ -133,12 +157,23 @@ async def run_pre_checks(src_provider, src_path, dest_provider, dest_path=None,
                 'max_size': max_size_bytes,
             }, code=413)
 
-    # Check 2: quota
-    if check_quota:
-        skip, dest_quota = await resolve_quota_context(operation, src_provider, dest_provider)
-        if not skip:
-            file_size = await _get_total_size(src_provider, data)
-            resolved_name = rename or src_path.name
-            replaced_size = await get_replaced_size(dest_provider, dest_path,
-                                                    resolved_name, conflict)
-            check_quota_limit(dest_quota, file_size, replaced_size)
+    if not check_quota:
+        return
+
+    # Check 2: quota -- resolved only now that check 1 has passed (or didn't apply).
+    skip, dest_quota = await resolve_quota_context(operation, src_provider, dest_provider)
+    if skip:
+        return
+
+    if data is None:
+        if src_path.is_dir:
+            data = await _fetch_all_pages(src_provider, src_path)
+        else:
+            data = [await src_provider.metadata(src_path, version=None, revision=None)]
+
+    file_size = await _get_total_size(src_provider, data)
+    resolved_name = rename or src_path.name
+    src_kind = 'folder' if src_path.is_dir else 'file'
+    replaced_size = await get_replaced_size(dest_provider, dest_path,
+                                            resolved_name, conflict, src_kind)
+    check_quota_limit(dest_quota, file_size, replaced_size)
