@@ -5,12 +5,15 @@ from waterbutler.tasks import core
 from waterbutler.core.path import WaterButlerPath
 from waterbutler.core import utils, remote_logging
 from waterbutler.core.log_payload import LogPayload
+from waterbutler.constants import DEFAULT_CONFLICT
+from waterbutler.tasks.pre_checks import run_pre_checks
 
 logger = logging.getLogger(__name__)
 
 
 @core.celery_task
-async def move(src_bundle, dest_bundle, request=None, start_time=None, **kwargs):
+async def move(src_bundle, dest_bundle, request=None, start_time=None,
+               max_size_bytes=None, check_quota=False, **kwargs):
 
     request = request or {}
     start_time = start_time or time.time()
@@ -26,6 +29,14 @@ async def move(src_bundle, dest_bundle, request=None, start_time=None, **kwargs)
 
     metadata, errors = None, []
     try:
+        # Run pre-checks before attempting the move to avoid partial moves and ensure we can report all errors at once
+        await run_pre_checks(src_provider, src_path, dest_provider,
+                             dest_path=dest_path,
+                             max_size_bytes=max_size_bytes, check_quota=check_quota,
+                             operation='move',
+                             conflict=kwargs.get('conflict', DEFAULT_CONFLICT),
+                             rename=kwargs.get('rename'),
+                             src_nid=src_bundle['nid'], dest_nid=dest_bundle['nid'])
         metadata, created = await src_provider.move(dest_provider, src_path, dest_path, **kwargs)
     except Exception as e:
         logger.error('Move failed with error {!r}'.format(e))

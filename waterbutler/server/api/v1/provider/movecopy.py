@@ -12,6 +12,10 @@ from waterbutler.core.utils import make_provider
 from waterbutler.constants import DEFAULT_CONFLICT
 from waterbutler.auth.osf.handler import EXPORT_DATA_FAKE_NODE_ID
 from waterbutler.tasks.settings import SYNCHRONOUS_TIMEOUT
+from waterbutler.tasks.pre_checks import (
+    run_pre_checks, get_replaced_size, resolve_quota_context, check_quota_limit,
+    should_skip_size_check,
+)
 
 auth_handler = AuthHandler(settings.AUTH_HANDLERS)
 
@@ -101,12 +105,13 @@ class MoveCopyMixin:
             self.auth['settings']
         )
         self.path = await self.provider.validate_v1_path(self.path, **self.arguments)
-
+        check_kwargs = {}
         if auth_action == 'rename':  # 'rename' implies the file/folder does not change location
             self.dest_auth = self.auth
             self.dest_provider = self.provider
             self.dest_path = self.path.parent
             self.dest_resource = self.resource
+            conflict = self.json.get('conflict', DEFAULT_CONFLICT)
         else:
             path = self.json.get('path', None)
             if path is None:
@@ -145,6 +150,57 @@ class MoveCopyMixin:
             )
             self.dest_path = await self.dest_provider.validate_path(**self.json)
 
+            conflict = self.json.get('conflict', DEFAULT_CONFLICT)
+
+            # Check if the file/folder is oversized
+            max_size_mb = self.dest_auth['settings'].get('max_file_size')
+            max_size_bytes = (int(max_size_mb) * 1024 * 1024) if max_size_mb else None
+
+            if not self.path.is_dir:
+                # Single-file path: read metadata once and check inline.
+                # No recursion needed — the item is guaranteed to be a file.
+                file_meta = await self.provider.metadata(
+                    self.path, version=None, revision=None
+                )
+                file_size = int(file_meta.size)
+
+                # max_file_size and quota are skipped on two different, independent
+                # conditions -- see should_skip_size_check() and resolve_quota_context().
+                run_size_check = max_size_bytes is not None and not should_skip_size_check(
+                    provider_action, self.provider, self.dest_provider,
+                    self.resource, self.dest_resource
+                )
+
+                # Check max_file_size first -- quota is fetched only after this check
+                # passes, so an oversized file never triggers a creator_quota request.
+                if run_size_check and file_size > max_size_bytes:
+                    raise exceptions.InvalidParameters({
+                        'message': 'Move/Copy Failed due to oversized files.',
+                        'oversized_files': [{'name': file_meta.name, 'size': file_size}],
+                        'max_size': max_size_bytes,
+                    }, code=413)
+
+                # Check quota (osfstorage only)
+                if self.dest_provider.NAME == 'osfstorage':
+                    skip_quota, dest_quota = await resolve_quota_context(
+                        provider_action, self.provider, self.dest_provider
+                    )
+                    if not skip_quota:
+                        resolved_name = self.json.get('rename') or self.path.name
+                        replaced_size = await get_replaced_size(
+                            self.dest_provider, self.dest_path, resolved_name, conflict, 'file'
+                        )
+                        check_quota_limit(dest_quota, file_size, replaced_size)
+                check_kwargs = {
+                    'max_size_bytes': None,
+                    'check_quota': False,
+                }
+            else:
+                check_kwargs = {
+                    'max_size_bytes': max_size_bytes,
+                    'check_quota': (self.dest_provider.NAME == 'osfstorage'),
+                }
+
         if not getattr(self.provider, 'can_intra_' + provider_action)(self.dest_provider, self.path):
             # this weird signature syntax courtesy of py3.4 not liking trailing commas on kwargs
             conflict = self.json.get('conflict', DEFAULT_CONFLICT)
@@ -158,6 +214,7 @@ class MoveCopyMixin:
                 request=remote_logging._serialize_request(self.request),
                 *self.build_args(),
                 **task_kwargs,
+                **check_kwargs,
             )
             synchronous = self.json.get('synchronous', 'false')
             synchronous = True if isinstance(synchronous, bool) and synchronous is True else False
@@ -168,16 +225,26 @@ class MoveCopyMixin:
                 # Use default timeout value for asynchronous processes
                 metadata, created = await tasks.wait_on_celery(result)
         else:
-            metadata, created = (
-                await tasks.backgrounded(
-                    getattr(self.provider, provider_action),
+            async def _intra_task():
+                if self.path.is_dir:
+                    await run_pre_checks(
+                        self.provider, self.path, self.dest_provider,
+                        dest_path=self.dest_path,
+                        operation=provider_action,
+                        conflict=conflict,
+                        rename=self.json.get('rename'),
+                        src_nid=self.resource, dest_nid=self.dest_resource,
+                        **check_kwargs
+                    )
+                return await getattr(self.provider, provider_action)(
                     self.dest_provider,
                     self.path,
                     self.dest_path,
                     rename=self.json.get('rename'),
-                    conflict=self.json.get('conflict', DEFAULT_CONFLICT),
+                    conflict=conflict,
                 )
-            )
+
+            metadata, created = await tasks.backgrounded(_intra_task)
 
         self.dest_meta = metadata
 
