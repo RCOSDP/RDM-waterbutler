@@ -14,6 +14,7 @@ from waterbutler.server import settings
 from waterbutler.utils import inspect_info  # noqa
 from waterbutler.server.api.v1 import core
 from waterbutler.core import remote_logging
+from waterbutler.core import rdm_access_log
 from waterbutler.server.auth import AuthHandler
 from waterbutler.core.log_payload import LogPayload
 from waterbutler.core.streams import RequestStreamReader
@@ -165,6 +166,15 @@ class ProviderHandler(core.BaseHandler, CreateMixin, MetadataMixin, MoveCopyMixi
 
     def on_finish(self):
         status, method = self.get_status(), self.request.method.upper()
+
+        # GakuNin RDM: アクセスログへ操作者識別フィールドを追記する。
+        # 以降の early return (HEAD/OPTIONS, 202/206, metadata 等) に
+        # 影響されないよう、判定前に出力する。
+        # self.auth は prepare() が失敗した場合は存在しない。
+        try:
+            rdm_access_log.emit_from_payload(getattr(self, 'auth', None))
+        except Exception:
+            pass
 
         # If the response code is not within the 200-302 range, the request was a HEAD or OPTIONS,
         # the response code is 202, or the response was a 206 partial request, then no callbacks
