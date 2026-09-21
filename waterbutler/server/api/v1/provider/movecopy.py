@@ -1,4 +1,5 @@
 import json
+import logging
 from http import HTTPStatus
 
 from waterbutler import tasks
@@ -18,6 +19,7 @@ from waterbutler.tasks.pre_checks import (
 )
 
 auth_handler = AuthHandler(settings.AUTH_HANDLERS)
+logger = logging.getLogger(__name__)
 
 
 class MoveCopyMixin:
@@ -162,13 +164,28 @@ class MoveCopyMixin:
                 file_meta = await self.provider.metadata(
                     self.path, version=None, revision=None
                 )
-                file_size = int(file_meta.size)
+                # size_as_int is None when the provider can't report a size (e.g. a Google
+                # Docs/Sheets/Slides file that hasn't been exported yet) -- int(file_meta.size)
+                # would raise TypeError in that case instead of failing the check gracefully.
+                file_size = file_meta.size_as_int
+                if file_size is None:
+                    logger.warning(
+                        'size_as_int is None for {!r} (provider={!r}, operation={!r}); '
+                        'skipping max_file_size/quota checks and treating size as 0'.format(
+                            file_meta.materialized_path, self.provider.NAME, provider_action
+                        )
+                    )
 
                 # max_file_size and quota are skipped on two different, independent
                 # conditions -- see should_skip_size_check() and resolve_quota_context().
-                run_size_check = max_size_bytes is not None and not should_skip_size_check(
-                    provider_action, self.provider, self.dest_provider,
-                    self.resource, self.dest_resource
+                # An unknown file_size also skips the max_file_size check, since there's
+                # nothing to compare against.
+                run_size_check = (
+                    max_size_bytes is not None and file_size is not None and
+                    not should_skip_size_check(
+                        provider_action, self.provider, self.dest_provider,
+                        self.resource, self.dest_resource
+                    )
                 )
 
                 # Check max_file_size first -- quota is fetched only after this check
@@ -188,9 +205,12 @@ class MoveCopyMixin:
                     if not skip_quota:
                         resolved_name = self.json.get('rename') or self.path.name
                         replaced_size = await get_replaced_size(
-                            self.dest_provider, self.dest_path, resolved_name, conflict, 'file'
+                            self.dest_provider, self.dest_path, resolved_name, conflict, 'file',
+                            operation=provider_action,
                         )
-                        check_quota_limit(dest_quota, file_size, replaced_size)
+                        # An unknown file_size can't be validated against quota either --
+                        # treat it as 0 rather than letting `None` blow up the arithmetic.
+                        check_quota_limit(dest_quota, file_size or 0, replaced_size)
                 check_kwargs = {
                     'max_size_bytes': None,
                     'check_quota': False,

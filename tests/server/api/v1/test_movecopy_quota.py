@@ -681,6 +681,72 @@ class TestQuotaCheck:
         assert exc.value.code == 413
 
     @pytest.mark.asyncio
+    async def test_copy_file_unknown_size_skips_checks_and_warns(
+            self, http_request, mock_inter_osfstorage_quota_ok, patch_auth_handler_max_file_size,
+            caplog):
+        """A file whose size_as_int is None (e.g. an un-exported Google Docs/Sheets/Slides
+        file) must not crash max_file_size/quota checks -- it is treated as 0 and never
+        blocks the operation -- but the skip must be logged as a warning (customer review
+        10/11 agreed policy)."""
+        mock_make_provider, dest_provider = mock_inter_osfstorage_quota_ok
+        src_provider = MockProvider()
+        file_meta = MockFileMetadataWithSize(None, name='doc.gdoc')
+        src_provider.metadata = MockCoroutine(return_value=file_meta)
+        mock_make_provider.side_effect = [src_provider, dest_provider]
+
+        handler = mock_handler(http_request)
+        handler.path = '/test_file'
+        handler._json = {'action': 'copy', 'path': '/dest_path/'}
+
+        with caplog.at_level('WARNING'):
+            await handler.move_or_copy()
+
+        handler.write.assert_called_once()
+        assert 'size_as_int is None' in caplog.text
+        assert "provider='MockProvider'" in caplog.text
+        assert "operation='copy'" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_move_file_replace_unknown_existing_size_treated_as_zero(
+            self, http_request, patch_auth_handler_no_max_file_size, monkeypatch, caplog):
+        """Replacing an existing destination file whose size is unknown must not crash and
+        must not subtract anything from the quota formula (treated as 0), with a warning
+        logged."""
+        import waterbutler.server.api.v1.provider.movecopy as movecopy_module
+
+        src_provider = MockProvider()
+        dest_provider = MockOsfStorageProvider()
+        file_meta = MockFileMetadataWithSize(600, name='test_file')
+        src_provider.metadata = MockCoroutine(return_value=file_meta)
+        dest_provider.get_quota = MockCoroutine(
+            return_value={'used': 400, 'max': 1000, 'user_guid': 'user-b', 'storage_type': 1}
+        )
+        dest_provider.metadata = MockCoroutine(
+            return_value=[MockFileMetadataWithSize(None, name='test_file')]
+        )
+
+        mock_make_provider = mock.Mock(side_effect=[src_provider, dest_provider])
+        monkeypatch.setattr(movecopy_module, 'make_provider', mock_make_provider)
+
+        mock_adelay = MockCoroutine(return_value='task-uuid-replace-unknown')
+        mock_wait = MockCoroutine(return_value=(MockFileMetadata(), False))
+        monkeypatch.setattr(movecopy_module.tasks.move, 'adelay', mock_adelay)
+        monkeypatch.setattr(movecopy_module.tasks, 'wait_on_celery', mock_wait)
+
+        handler = mock_handler(http_request)
+        handler.path = '/test_file'
+        # 400 (used) + 600 (file_size) - 0 (unknown existing size treated as 0) = 1000,
+        # not > 1000 -> must pass.
+        handler._json = {'action': 'move', 'path': '/dest_path/', 'conflict': 'replace'}
+
+        with caplog.at_level('WARNING'):
+            await handler.move_or_copy()
+
+        handler.write.assert_called_once()
+        assert 'size_as_int is None' in caplog.text
+        assert "operation='move'" in caplog.text
+
+    @pytest.mark.asyncio
     async def test_copy_file_across_user_quota_still_enforces_max_file_size(
             self, http_request, patch_auth_handler_max_file_size, monkeypatch):
         """A copy into another UserQuota record is still rejected with 413; the relaxation
