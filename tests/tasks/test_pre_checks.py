@@ -852,6 +852,67 @@ class TestPreChecks:
         src_provider.metadata.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_folder_quota_treats_unknown_size_as_zero_and_warns(self, monkeypatch, caplog):
+        """A file whose size_as_int is None (e.g. an un-exported Google Docs/Sheets/Slides
+        file) must not crash the quota calculation -- it contributes 0 -- but the skip must
+        be logged as a warning (customer review 10/11 agreed policy)."""
+        monkeypatch.setattr(time, 'sleep', lambda sec: None)
+        src_provider = MockProvider()
+        src_path = WaterButlerPath('/folder/', prepend=None)
+        dest_provider = MockProvider()
+
+        known_file = MockFileMetadataWithSize(100, name='known.txt')
+        unknown_file = MockFileMetadataWithSize(None, name='doc.gdoc')
+        src_provider.metadata = MockCoroutine(return_value=[known_file, unknown_file])
+        dest_provider.get_quota = MockCoroutine(return_value={'used': 0, 'max': 1000})
+
+        with caplog.at_level('WARNING'):
+            await run_pre_checks(src_provider, src_path, dest_provider, check_quota=True,
+                                 operation='copy')
+
+        assert 'size_as_int is None' in caplog.text
+        assert "provider='MockProvider'" in caplog.text
+        assert "operation='copy'" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_folder_max_size_skips_unknown_size_file_and_warns(self, monkeypatch, caplog):
+        """A file with unknown size has nothing to compare against max_file_size, so it must
+        never be flagged as oversized -- but the skip must be logged as a warning."""
+        monkeypatch.setattr(time, 'sleep', lambda sec: None)
+        src_provider = MockProvider()
+        src_path = WaterButlerPath('/folder/', prepend=None)
+        dest_provider = MockProvider()
+
+        unknown_file = MockFileMetadataWithSize(None, name='doc.gdoc')
+        src_provider.metadata = MockCoroutine(return_value=[unknown_file])
+
+        with caplog.at_level('WARNING'):
+            await run_pre_checks(src_provider, src_path, dest_provider, max_size_bytes=100,
+                                 operation='copy')
+
+        assert 'size_as_int is None' in caplog.text
+        assert "operation='copy'" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_get_replaced_size_treats_unknown_size_as_zero_and_warns(self, monkeypatch, caplog):
+        """An existing destination file with unknown size (being overwritten) must be
+        treated as 0, not crash get_replaced_size -- with a warning logged."""
+        monkeypatch.setattr(time, 'sleep', lambda sec: None)
+        dest_provider = MockProvider()
+        dest_container_path = WaterButlerPath('/dest/', prepend=None)
+        dest_provider.metadata = MockCoroutine(
+            return_value=[MockFileMetadataWithSize(None, name='Foo.txt')]
+        )
+
+        with caplog.at_level('WARNING'):
+            size = await get_replaced_size(dest_provider, dest_container_path, 'Foo.txt',
+                                           'replace', 'file', operation='move')
+
+        assert size == 0
+        assert 'size_as_int is None' in caplog.text
+        assert "operation='move'" in caplog.text
+
+    @pytest.mark.asyncio
     async def test_folder_pre_check_matches_replaced_item_by_kind(self, monkeypatch):
         """A folder move onto a same-named file frees nothing, so the quota formula must
         not subtract that file's size."""

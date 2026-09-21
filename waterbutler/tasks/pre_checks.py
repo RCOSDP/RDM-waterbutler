@@ -1,4 +1,8 @@
+import logging
+
 from waterbutler.core import exceptions
+
+logger = logging.getLogger(__name__)
 
 
 async def _fetch_all_pages(provider, path):
@@ -17,35 +21,53 @@ async def _fetch_all_pages(provider, path):
     return all_data
 
 
-async def _get_total_size(provider, data):
+async def _get_total_size(provider, data, operation=None):
     """Recursively calculate total size of all files."""
     size = 0
     for item in data:
         if item.kind == 'file':
-            size += int(item.size)
+            item_size = item.size_as_int
+            if item_size is None:
+                logger.warning(
+                    'size_as_int is None for {!r} (provider={!r}, operation={!r}); '
+                    'treating size as 0 for quota calculation'.format(
+                        item.materialized_path, provider.NAME, operation
+                    )
+                )
+            size += item_size or 0
         else:
             child_path = await provider.validate_path(item.path)
             children = await _fetch_all_pages(provider, child_path)
-            size += await _get_total_size(provider, children)
+            size += await _get_total_size(provider, children, operation=operation)
     return size
 
 
-async def _get_oversized_files(provider, data, max_size_bytes):
+async def _get_oversized_files(provider, data, max_size_bytes, operation=None):
     """Recursively find files exceeding max_size_bytes."""
     oversized = []
     for item in sorted(data, key=lambda i: (0 if i.kind == 'folder' else 1, i.name.lower())):
         if item.kind == 'file':
-            if int(item.size) > max_size_bytes:
-                oversized.append({'name': item.name, 'size': int(item.size)})
+            item_size = item.size_as_int
+            if item_size is None:
+                logger.warning(
+                    'size_as_int is None for {!r} (provider={!r}, operation={!r}); '
+                    'skipping max_file_size check for this file'.format(
+                        item.materialized_path, provider.NAME, operation
+                    )
+                )
+            elif item_size > max_size_bytes:
+                oversized.append({'name': item.name, 'size': item_size})
         else:
             child_path = await provider.validate_path(item.path)
             children = await _fetch_all_pages(provider, child_path)
-            oversized.extend(await _get_oversized_files(provider, children, max_size_bytes))
+            oversized.extend(
+                await _get_oversized_files(provider, children, max_size_bytes, operation=operation)
+            )
     return oversized
 
 
 async def get_replaced_size(dest_provider, dest_container_path, resolved_name, conflict,
-                            src_kind):
+                            src_kind, operation=None):
     """Size of the existing file/folder being overwritten on replace, else 0.
 
     ``src_kind`` is the kind ('file' or 'folder') of the item being moved/copied. Only a
@@ -64,11 +86,19 @@ async def get_replaced_size(dest_provider, dest_container_path, resolved_name, c
         return 0
 
     if existing.kind == 'file':
-        return int(existing.size)
+        item_size = existing.size_as_int
+        if item_size is None:
+            logger.warning(
+                'size_as_int is None for {!r} (provider={!r}, operation={!r}); '
+                'treating replaced size as 0 for quota calculation'.format(
+                    existing.materialized_path, dest_provider.NAME, operation
+                )
+            )
+        return item_size or 0
 
     existing_path = await dest_provider.validate_path(existing.path)
     existing_children = await _fetch_all_pages(dest_provider, existing_path)
-    return await _get_total_size(dest_provider, existing_children)
+    return await _get_total_size(dest_provider, existing_children, operation=operation)
 
 
 async def resolve_quota_context(operation, src_provider, dest_provider):
@@ -149,7 +179,8 @@ async def run_pre_checks(src_provider, src_path, dest_provider, dest_path=None,
         else:
             data = [await src_provider.metadata(src_path, version=None, revision=None)]
 
-        oversized = await _get_oversized_files(src_provider, data, max_size_bytes)
+        oversized = await _get_oversized_files(src_provider, data, max_size_bytes,
+                                               operation=operation)
         if oversized:
             raise exceptions.InvalidParameters({
                 'message': 'Move/Copy Failed due to oversized files.',
@@ -171,9 +202,10 @@ async def run_pre_checks(src_provider, src_path, dest_provider, dest_path=None,
         else:
             data = [await src_provider.metadata(src_path, version=None, revision=None)]
 
-    file_size = await _get_total_size(src_provider, data)
+    file_size = await _get_total_size(src_provider, data, operation=operation)
     resolved_name = rename or src_path.name
     src_kind = 'folder' if src_path.is_dir else 'file'
     replaced_size = await get_replaced_size(dest_provider, dest_path,
-                                            resolved_name, conflict, src_kind)
+                                            resolved_name, conflict, src_kind,
+                                            operation=operation)
     check_quota_limit(dest_quota, file_size, replaced_size)
