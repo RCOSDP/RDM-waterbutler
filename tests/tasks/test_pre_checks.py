@@ -675,9 +675,7 @@ class TestPreChecks:
     @pytest.mark.asyncio
     async def test_move_same_region_different_project_also_skips_max_file_size(self, monkeypatch):
         """A move between a project and its same-region component must skip max_file_size
-        too, even with a different node/creator -- region is the only differentiator for
-        osfstorage (this is the exact case customer review 4 corrected: node-match used
-        to wrongly enforce the limit here)."""
+        too, even with a different node/creator."""
         monkeypatch.setattr(time, 'sleep', lambda sec: None)
         src_provider = MockProvider(settings={'nid': 'node-1'})
         dest_provider = MockProvider(settings={'nid': 'node-2'})
@@ -788,8 +786,7 @@ class TestPreChecks:
     @pytest.mark.asyncio
     async def test_move_non_osfstorage_different_project_still_enforces_max_file_size(self, monkeypatch):
         """Destinations that have no quota to check (non-osfstorage) still enforce the
-        size limit when source and destination are different projects -- no quota lookup
-        happens at all."""
+        size limit when source and destination are different projects."""
         monkeypatch.setattr(time, 'sleep', lambda sec: None)
         src_provider = MockProvider(settings={'nid': 'node-1'})
         dest_provider = MockProvider(settings={'nid': 'node-2'})
@@ -810,10 +807,7 @@ class TestPreChecks:
 
     @pytest.mark.asyncio
     async def test_move_non_osfstorage_different_project_enforces_even_when_provider_nid_matches(self, monkeypatch):
-        """Regression for the customer-review-4 `provider.nid` trap: even if the provider
-        objects themselves carry an equal (or equally None) `.nid`, the decision must use
-        the caller-supplied src_nid/dest_nid -- so a genuine cross-project move is never
-        wrongly exempted."""
+        """Regression for `provider.nid`, the decision must use the caller-supplied src_nid/dest_nid."""
         monkeypatch.setattr(time, 'sleep', lambda sec: None)
         src_provider = MockProvider(settings={'nid': None})
         dest_provider = MockProvider(settings={'nid': None})
@@ -854,8 +848,7 @@ class TestPreChecks:
     @pytest.mark.asyncio
     async def test_folder_quota_treats_unknown_size_as_zero_and_warns(self, monkeypatch, caplog):
         """A file whose size_as_int is None (e.g. an un-exported Google Docs/Sheets/Slides
-        file) must not crash the quota calculation -- it contributes 0 -- but the skip must
-        be logged as a warning (customer review 10/11 agreed policy)."""
+        file) must not crash the quota calculation."""
         monkeypatch.setattr(time, 'sleep', lambda sec: None)
         src_provider = MockProvider()
         src_path = WaterButlerPath('/folder/', prepend=None)
@@ -875,9 +868,31 @@ class TestPreChecks:
         assert "operation='copy'" in caplog.text
 
     @pytest.mark.asyncio
+    async def test_folder_quota_treats_negative_size_as_zero_and_warns(self, monkeypatch, caplog):
+        """A file whose size_as_int is negative (e.g. an osfstorage version whose size was
+        never set, default -1) must not be added to the running total as-is."""
+        monkeypatch.setattr(time, 'sleep', lambda sec: None)
+        src_provider = MockProvider()
+        src_path = WaterButlerPath('/folder/', prepend=None)
+        dest_provider = MockProvider()
+
+        known_file = MockFileMetadataWithSize(100, name='known.txt')
+        negative_file = MockFileMetadataWithSize(-1, name='bad.txt')
+        src_provider.metadata = MockCoroutine(return_value=[known_file, negative_file])
+        dest_provider.get_quota = MockCoroutine(return_value={'used': 0, 'max': 1000})
+
+        with caplog.at_level('WARNING'):
+            await run_pre_checks(src_provider, src_path, dest_provider, check_quota=True,
+                                 operation='copy')
+
+        assert 'size_as_int is negative' in caplog.text
+        assert "provider='MockProvider'" in caplog.text
+        assert "operation='copy'" in caplog.text
+
+    @pytest.mark.asyncio
     async def test_folder_max_size_skips_unknown_size_file_and_warns(self, monkeypatch, caplog):
         """A file with unknown size has nothing to compare against max_file_size, so it must
-        never be flagged as oversized -- but the skip must be logged as a warning."""
+        never be flagged as oversized."""
         monkeypatch.setattr(time, 'sleep', lambda sec: None)
         src_provider = MockProvider()
         src_path = WaterButlerPath('/folder/', prepend=None)
@@ -894,9 +909,28 @@ class TestPreChecks:
         assert "operation='copy'" in caplog.text
 
     @pytest.mark.asyncio
+    async def test_folder_max_size_skips_negative_size_file_and_warns(self, monkeypatch, caplog):
+        """A file with a negative size has nothing meaningful to compare against
+        max_file_size, so it must never be flagged as oversized."""
+        monkeypatch.setattr(time, 'sleep', lambda sec: None)
+        src_provider = MockProvider()
+        src_path = WaterButlerPath('/folder/', prepend=None)
+        dest_provider = MockProvider()
+
+        negative_file = MockFileMetadataWithSize(-1, name='bad.txt')
+        src_provider.metadata = MockCoroutine(return_value=[negative_file])
+
+        with caplog.at_level('WARNING'):
+            await run_pre_checks(src_provider, src_path, dest_provider, max_size_bytes=100,
+                                 operation='copy')
+
+        assert 'size_as_int is negative' in caplog.text
+        assert "operation='copy'" in caplog.text
+
+    @pytest.mark.asyncio
     async def test_get_replaced_size_treats_unknown_size_as_zero_and_warns(self, monkeypatch, caplog):
         """An existing destination file with unknown size (being overwritten) must be
-        treated as 0, not crash get_replaced_size -- with a warning logged."""
+        treated as 0, not crash get_replaced_size."""
         monkeypatch.setattr(time, 'sleep', lambda sec: None)
         dest_provider = MockProvider()
         dest_container_path = WaterButlerPath('/dest/', prepend=None)
@@ -910,6 +944,25 @@ class TestPreChecks:
 
         assert size == 0
         assert 'size_as_int is None' in caplog.text
+        assert "operation='move'" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_get_replaced_size_treats_negative_size_as_zero_and_warns(self, monkeypatch, caplog):
+        """An existing destination file with a negative size (being overwritten) must be
+        treated as 0, not passed through as replaced_size."""
+        monkeypatch.setattr(time, 'sleep', lambda sec: None)
+        dest_provider = MockProvider()
+        dest_container_path = WaterButlerPath('/dest/', prepend=None)
+        dest_provider.metadata = MockCoroutine(
+            return_value=[MockFileMetadataWithSize(-1, name='Foo.txt')]
+        )
+
+        with caplog.at_level('WARNING'):
+            size = await get_replaced_size(dest_provider, dest_container_path, 'Foo.txt',
+                                           'replace', 'file', operation='move')
+
+        assert size == 0
+        assert 'size_as_int is negative' in caplog.text
         assert "operation='move'" in caplog.text
 
     @pytest.mark.asyncio

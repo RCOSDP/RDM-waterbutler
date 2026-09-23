@@ -240,9 +240,7 @@ class TestMaxFileSizeCheck:
     async def test_move_file_same_project_non_osfstorage_skips_max_file_size(
             self, http_request, mock_inter, patch_auth_handler_max_file_size):
         """A single-file move on a non-osfstorage provider that stays within the same
-        resource (project) must skip max_file_size -- node-match still applies here,
-        driven by the request's own resource id, never by provider.nid (see
-        should_skip_size_check())."""
+        resource (project) must skip max_file_size."""
         mock_make_provider, _ = mock_inter
         src_provider = MockProvider()
         dest_provider = MockProvider()
@@ -622,8 +620,7 @@ class TestQuotaCheck:
     async def test_move_file_same_region_skips_max_file_size(
             self, http_request, patch_auth_handler_max_file_size, monkeypatch):
         """A single-file osfstorage move that stays within the same region re-uploads
-        nothing, so max_file_size must not reject it -- regardless of node (customer
-        review 4: the differentiator for osfstorage is region, not node/project)."""
+        nothing, so max_file_size must not reject it."""
         import waterbutler.server.api.v1.provider.movecopy as movecopy_module
 
         src_provider = MockOsfStorageProvider()
@@ -686,8 +683,7 @@ class TestQuotaCheck:
             caplog):
         """A file whose size_as_int is None (e.g. an un-exported Google Docs/Sheets/Slides
         file) must not crash max_file_size/quota checks -- it is treated as 0 and never
-        blocks the operation -- but the skip must be logged as a warning (customer review
-        10/11 agreed policy)."""
+        blocks the operation."""
         mock_make_provider, dest_provider = mock_inter_osfstorage_quota_ok
         src_provider = MockProvider()
         file_meta = MockFileMetadataWithSize(None, name='doc.gdoc')
@@ -703,6 +699,29 @@ class TestQuotaCheck:
 
         handler.write.assert_called_once()
         assert 'size_as_int is None' in caplog.text
+        assert "provider='MockProvider'" in caplog.text
+        assert "operation='copy'" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_copy_file_negative_size_skips_checks_and_warns(
+            self, http_request, mock_inter_osfstorage_quota_ok, patch_auth_handler_max_file_size,
+            caplog):
+        """A file whose size_as_int is negative."""
+        mock_make_provider, dest_provider = mock_inter_osfstorage_quota_ok
+        src_provider = MockProvider()
+        file_meta = MockFileMetadataWithSize(-1, name='bad.txt')
+        src_provider.metadata = MockCoroutine(return_value=file_meta)
+        mock_make_provider.side_effect = [src_provider, dest_provider]
+
+        handler = mock_handler(http_request)
+        handler.path = '/test_file'
+        handler._json = {'action': 'copy', 'path': '/dest_path/'}
+
+        with caplog.at_level('WARNING'):
+            await handler.move_or_copy()
+
+        handler.write.assert_called_once()
+        assert 'size_as_int is negative' in caplog.text
         assert "provider='MockProvider'" in caplog.text
         assert "operation='copy'" in caplog.text
 
