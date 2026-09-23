@@ -173,14 +173,14 @@ class MoveCopyMixin:
                 if file_size is None:
                     logger.warning(
                         'size_as_int is None for {!r} (provider={!r}, operation={!r}); '
-                        'skipping max_file_size/quota checks and treating size as 0'.format(
+                        'treating size as 0 for max_file_size/quota calculation'.format(
                             file_meta.materialized_path, self.provider.NAME, provider_action
                         )
                     )
                 elif file_size < 0:
                     logger.warning(
                         'size_as_int is negative ({!r}) for {!r} (provider={!r}, operation={!r}); '
-                        'skipping max_file_size/quota checks and treating size as 0'.format(
+                        'treating size as 0 for max_file_size/quota calculation'.format(
                             file_size, file_meta.materialized_path, self.provider.NAME,
                             provider_action
                         )

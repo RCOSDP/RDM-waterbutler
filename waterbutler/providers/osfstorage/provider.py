@@ -488,12 +488,14 @@ class OSFStorageProvider(provider.BaseProvider):
                     if size_as_int is None:
                         logger.warning(
                             'dest_meta.size_as_int is None for %s (provider=%s, action=%s); '
-                            'treating replaced_size as 0', dest_path, dest_provider.NAME, action
+                            'treating replaced size as 0 for quota calculation',
+                            dest_path, dest_provider.NAME, action
                         )
                     elif size_as_int < 0:
                         logger.warning(
                             'dest_meta.size_as_int is negative (%s) for %s (provider=%s, action=%s); '
-                            'treating replaced_size as 0', size_as_int, dest_path, dest_provider.NAME, action
+                            'treating replaced size as 0 for quota calculation',
+                            size_as_int, dest_path, dest_provider.NAME, action
                         )
                     else:
                         replaced_size = size_as_int
