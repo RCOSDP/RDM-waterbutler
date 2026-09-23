@@ -1098,6 +1098,86 @@ class TestQuota:
         dest_provider.delete.assert_called_once_with(dest_path)
 
     @pytest.mark.asyncio
+    async def test__do_intra_move_or_copy_replaced_size_none(self, provider_one, auth, credentials,
+                                                              settings_region_one):
+        """When dest_meta.size_as_int is None (provider couldn't parse a size),
+        replaced_size must fall back to 0 instead of raising or misreporting.
+        """
+        # Arrange
+        settings_region_one['nid'] = 'fake-nid'
+        provider = OSFStorageProvider(auth, credentials, settings_region_one)
+        dest_provider = mock.Mock()
+        dest_provider.nid = 'fake-nid'
+        dest_path = mock.Mock()
+        dest_path.identifier = 'some-id'
+        dest_path.name = 'file.txt'
+        dest_path.parent = mock.Mock()
+        dest_path.parent.identifier = 'parent-id'
+        src_path = mock.Mock()
+        src_path.identifier = 'src-id'
+        src_path.name = 'srcfile.txt'
+        src_path.parent = mock.Mock()
+        src_path.parent.identifier = 'src-parent-id'
+
+        meta_mock = mock.Mock()
+        meta_mock.size = None
+        meta_mock.size_as_int = None
+        dest_provider.metadata = utils.MockCoroutine(return_value=meta_mock)
+        dest_provider.delete = utils.MockCoroutine()
+
+        provider.make_signed_request = utils.MockCoroutine()
+        provider.make_signed_request.return_value.json = utils.MockCoroutine(return_value={'kind': 'file'})
+
+        # Act
+        await provider._do_intra_move_or_copy('copy', dest_provider, src_path, dest_path)
+
+        # Assert: replaced_size falls back to 0, no exception raised
+        args, kwargs = provider.make_signed_request.call_args
+        data = kwargs['data']
+        assert '"replaced_size": 0' in data
+        dest_provider.delete.assert_called_once_with(dest_path)
+
+    @pytest.mark.asyncio
+    async def test__do_intra_move_or_copy_replaced_size_negative(self, provider_one, auth, credentials,
+                                                                  settings_region_one):
+        """When dest_meta.size_as_int is negative (unexpected provider data),
+        replaced_size must fall back to 0 instead of propagating the bad value.
+        """
+        # Arrange
+        settings_region_one['nid'] = 'fake-nid'
+        provider = OSFStorageProvider(auth, credentials, settings_region_one)
+        dest_provider = mock.Mock()
+        dest_provider.nid = 'fake-nid'
+        dest_path = mock.Mock()
+        dest_path.identifier = 'some-id'
+        dest_path.name = 'file.txt'
+        dest_path.parent = mock.Mock()
+        dest_path.parent.identifier = 'parent-id'
+        src_path = mock.Mock()
+        src_path.identifier = 'src-id'
+        src_path.name = 'srcfile.txt'
+        src_path.parent = mock.Mock()
+        src_path.parent.identifier = 'src-parent-id'
+
+        meta_mock = mock.Mock()
+        meta_mock.size = -1
+        meta_mock.size_as_int = -1
+        dest_provider.metadata = utils.MockCoroutine(return_value=meta_mock)
+        dest_provider.delete = utils.MockCoroutine()
+
+        provider.make_signed_request = utils.MockCoroutine()
+        provider.make_signed_request.return_value.json = utils.MockCoroutine(return_value={'kind': 'file'})
+
+        # Act
+        await provider._do_intra_move_or_copy('copy', dest_provider, src_path, dest_path)
+
+        # Assert: replaced_size falls back to 0, no exception raised
+        args, kwargs = provider.make_signed_request.call_args
+        data = kwargs['data']
+        assert '"replaced_size": 0' in data
+        dest_provider.delete.assert_called_once_with(dest_path)
+
+    @pytest.mark.asyncio
     async def test__do_intra_move_or_copy_metadata_exception_raises_provider_error(
             self, provider_one, auth, credentials, settings_region_one):
         """When dest_provider.metadata() raises any exception while fetching
