@@ -34,7 +34,16 @@ async def _get_total_size(provider, data, operation=None):
                         item.materialized_path, provider.NAME, operation
                     )
                 )
-            size += item_size or 0
+                item_size = 0
+            elif item_size < 0:
+                logger.warning(
+                    'size_as_int is negative ({!r}) for {!r} (provider={!r}, operation={!r}); '
+                    'treating size as 0 for quota calculation'.format(
+                        item_size, item.materialized_path, provider.NAME, operation
+                    )
+                )
+                item_size = 0
+            size += item_size
         else:
             child_path = await provider.validate_path(item.path)
             children = await _fetch_all_pages(provider, child_path)
@@ -53,6 +62,13 @@ async def _get_oversized_files(provider, data, max_size_bytes, operation=None):
                     'size_as_int is None for {!r} (provider={!r}, operation={!r}); '
                     'skipping max_file_size check for this file'.format(
                         item.materialized_path, provider.NAME, operation
+                    )
+                )
+            elif item_size < 0:
+                logger.warning(
+                    'size_as_int is negative ({!r}) for {!r} (provider={!r}, operation={!r}); '
+                    'skipping max_file_size check for this file'.format(
+                        item_size, item.materialized_path, provider.NAME, operation
                     )
                 )
             elif item_size > max_size_bytes:
@@ -94,7 +110,16 @@ async def get_replaced_size(dest_provider, dest_container_path, resolved_name, c
                     existing.materialized_path, dest_provider.NAME, operation
                 )
             )
-        return item_size or 0
+            return 0
+        if item_size < 0:
+            logger.warning(
+                'size_as_int is negative ({!r}) for {!r} (provider={!r}, operation={!r}); '
+                'treating replaced size as 0 for quota calculation'.format(
+                    item_size, existing.materialized_path, dest_provider.NAME, operation
+                )
+            )
+            return 0
+        return item_size
 
     existing_path = await dest_provider.validate_path(existing.path)
     existing_children = await _fetch_all_pages(dest_provider, existing_path)

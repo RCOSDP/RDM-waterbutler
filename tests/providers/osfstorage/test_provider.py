@@ -513,8 +513,12 @@ class TestIntraMoveCopy:
         dest_provider._children_metadata = utils.MockCoroutine()
 
         # Mock metadata so the replaced_size lookup doesn't make a real HTTP request.
+        # size_as_int must be set explicitly: a plain Mock() auto-vivifies any attribute
+        # access, so `hasattr(dest_meta, 'size_as_int')` is always True and the unset
+        # attribute would be a Mock instead of an int.
         dest_meta_mock = mock.Mock()
         dest_meta_mock.size = 1234
+        dest_meta_mock.size_as_int = 1234
         dest_provider.metadata = utils.MockCoroutine(return_value=dest_meta_mock)
 
         src_path = WaterButlerPath('/test_file', _ids=['RootId', 'fileId'], folder=False)
@@ -1068,9 +1072,13 @@ class TestQuota:
         src_path.parent = mock.Mock()
         src_path.parent.identifier = 'src-parent-id'
 
-        # Mock metadata to return an object with a size attribute
+        # Mock metadata to return an object with a size attribute.
+        # size_as_int must be set explicitly: a plain Mock() auto-vivifies any attribute
+        # access, so `hasattr(dest_meta, 'size_as_int')` is always True and the unset
+        # attribute would be a Mock instead of an int.
         meta_mock = mock.Mock()
         meta_mock.size = 1234
+        meta_mock.size_as_int = 1234
         dest_provider.metadata = utils.MockCoroutine(return_value=meta_mock)
         dest_provider.delete = utils.MockCoroutine()
 

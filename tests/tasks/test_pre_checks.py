@@ -875,6 +875,29 @@ class TestPreChecks:
         assert "operation='copy'" in caplog.text
 
     @pytest.mark.asyncio
+    async def test_folder_quota_treats_negative_size_as_zero_and_warns(self, monkeypatch, caplog):
+        """A file whose size_as_int is negative (e.g. an osfstorage version whose size was
+        never set, default -1) must not be added to the running total as-is -- it
+        contributes 0, with the skip logged as a warning (customer review 13, item B)."""
+        monkeypatch.setattr(time, 'sleep', lambda sec: None)
+        src_provider = MockProvider()
+        src_path = WaterButlerPath('/folder/', prepend=None)
+        dest_provider = MockProvider()
+
+        known_file = MockFileMetadataWithSize(100, name='known.txt')
+        negative_file = MockFileMetadataWithSize(-1, name='bad.txt')
+        src_provider.metadata = MockCoroutine(return_value=[known_file, negative_file])
+        dest_provider.get_quota = MockCoroutine(return_value={'used': 0, 'max': 1000})
+
+        with caplog.at_level('WARNING'):
+            await run_pre_checks(src_provider, src_path, dest_provider, check_quota=True,
+                                 operation='copy')
+
+        assert 'size_as_int is negative' in caplog.text
+        assert "provider='MockProvider'" in caplog.text
+        assert "operation='copy'" in caplog.text
+
+    @pytest.mark.asyncio
     async def test_folder_max_size_skips_unknown_size_file_and_warns(self, monkeypatch, caplog):
         """A file with unknown size has nothing to compare against max_file_size, so it must
         never be flagged as oversized -- but the skip must be logged as a warning."""
@@ -894,6 +917,26 @@ class TestPreChecks:
         assert "operation='copy'" in caplog.text
 
     @pytest.mark.asyncio
+    async def test_folder_max_size_skips_negative_size_file_and_warns(self, monkeypatch, caplog):
+        """A file with a negative size has nothing meaningful to compare against
+        max_file_size, so it must never be flagged as oversized -- but the skip must be
+        logged as a warning (customer review 13, item B)."""
+        monkeypatch.setattr(time, 'sleep', lambda sec: None)
+        src_provider = MockProvider()
+        src_path = WaterButlerPath('/folder/', prepend=None)
+        dest_provider = MockProvider()
+
+        negative_file = MockFileMetadataWithSize(-1, name='bad.txt')
+        src_provider.metadata = MockCoroutine(return_value=[negative_file])
+
+        with caplog.at_level('WARNING'):
+            await run_pre_checks(src_provider, src_path, dest_provider, max_size_bytes=100,
+                                 operation='copy')
+
+        assert 'size_as_int is negative' in caplog.text
+        assert "operation='copy'" in caplog.text
+
+    @pytest.mark.asyncio
     async def test_get_replaced_size_treats_unknown_size_as_zero_and_warns(self, monkeypatch, caplog):
         """An existing destination file with unknown size (being overwritten) must be
         treated as 0, not crash get_replaced_size -- with a warning logged."""
@@ -910,6 +953,26 @@ class TestPreChecks:
 
         assert size == 0
         assert 'size_as_int is None' in caplog.text
+        assert "operation='move'" in caplog.text
+
+    @pytest.mark.asyncio
+    async def test_get_replaced_size_treats_negative_size_as_zero_and_warns(self, monkeypatch, caplog):
+        """An existing destination file with a negative size (being overwritten) must be
+        treated as 0, not passed through as replaced_size -- with a warning logged
+        (customer review 13, item B)."""
+        monkeypatch.setattr(time, 'sleep', lambda sec: None)
+        dest_provider = MockProvider()
+        dest_container_path = WaterButlerPath('/dest/', prepend=None)
+        dest_provider.metadata = MockCoroutine(
+            return_value=[MockFileMetadataWithSize(-1, name='Foo.txt')]
+        )
+
+        with caplog.at_level('WARNING'):
+            size = await get_replaced_size(dest_provider, dest_container_path, 'Foo.txt',
+                                           'replace', 'file', operation='move')
+
+        assert size == 0
+        assert 'size_as_int is negative' in caplog.text
         assert "operation='move'" in caplog.text
 
     @pytest.mark.asyncio
