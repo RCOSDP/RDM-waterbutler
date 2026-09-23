@@ -707,6 +707,29 @@ class TestQuotaCheck:
         assert "operation='copy'" in caplog.text
 
     @pytest.mark.asyncio
+    async def test_copy_file_negative_size_skips_checks_and_warns(
+            self, http_request, mock_inter_osfstorage_quota_ok, patch_auth_handler_max_file_size,
+            caplog):
+        """A file whose size_as_int is negative."""
+        mock_make_provider, dest_provider = mock_inter_osfstorage_quota_ok
+        src_provider = MockProvider()
+        file_meta = MockFileMetadataWithSize(-1, name='bad.txt')
+        src_provider.metadata = MockCoroutine(return_value=file_meta)
+        mock_make_provider.side_effect = [src_provider, dest_provider]
+
+        handler = mock_handler(http_request)
+        handler.path = '/test_file'
+        handler._json = {'action': 'copy', 'path': '/dest_path/'}
+
+        with caplog.at_level('WARNING'):
+            await handler.move_or_copy()
+
+        handler.write.assert_called_once()
+        assert 'size_as_int is negative' in caplog.text
+        assert "provider='MockProvider'" in caplog.text
+        assert "operation='copy'" in caplog.text
+
+    @pytest.mark.asyncio
     async def test_move_file_replace_unknown_existing_size_treated_as_zero(
             self, http_request, patch_auth_handler_no_max_file_size, monkeypatch, caplog):
         """Replacing an existing destination file whose size is unknown must not crash and
