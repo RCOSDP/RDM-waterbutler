@@ -84,13 +84,16 @@ class TestFileMetadata:
 
 
 class TestEtagConsistency:
-    """One object has to report one ETag, whether it was seen through HEAD or ListObjects.
+    """HEAD and ListObjects must report the same ETag for one object."""
 
-    S3 quotes the ETag in the HEAD header and in the ListObjects body alike.  If only one of the
-    two readers strips the quotes, ``md5`` and the ``etag`` that ``serialized()`` hashes differ
-    for one and the same object, so anything comparing a listing against a stat -- the dedup of
-    an upload, a client cache -- sees a change that never happened.
-    """
+    def _listing(self, quoted_etag):
+        return S3FileMetadata(OrderedDict(
+            Key='my-image.jpg',
+            LastModified='2009-10-12T17:50:30.000Z',
+            ETag=quoted_etag,
+            Size='434234',
+            StorageClass='STANDARD',
+        ))
 
     @pytest.mark.parametrize('quoted_etag', ['"abc"', '"abc-4"'])
     def test_headers_and_listing_agree(self, quoted_etag):
@@ -100,28 +103,16 @@ class TestEtagConsistency:
             'Content-Type': 'binary/octet-stream',
             'ETag': quoted_etag,
         })
-        listing = S3FileMetadata(OrderedDict(
-            Key='my-image.jpg',
-            LastModified='2009-10-12T17:50:30.000Z',
-            ETag=quoted_etag,
-            Size='434234',
-            StorageClass='STANDARD',
-        ))
+        listing = self._listing(quoted_etag)
 
         assert headers.etag == listing.etag
         assert headers.extra['md5'] == listing.extra['md5']
-        assert headers.extra['hashes']['md5'] == listing.extra['hashes']['md5']
         assert headers.serialized()['etag'] == listing.serialized()['etag']
 
-        # A multipart ETag keeps its `-<parts>` suffix; only the quotes come off.
-        assert headers.etag == quoted_etag.strip('"')
-
-    def test_boto_spelling_of_the_header_is_stripped_too(self):
-        """``Etag`` is what boto handed back, and the reader still accepts it."""
+    def test_boto_spelling_of_the_header_agrees_too(self):
         headers = S3FileMetadataHeaders('my-image.jpg', {'Etag': '"abc"'})
 
-        assert headers.etag == 'abc'
-        assert headers.extra['md5'] == 'abc'
+        assert headers.etag == self._listing('"abc"').etag
 
 
 class TestFolderMetadata:

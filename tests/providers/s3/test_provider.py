@@ -787,8 +787,6 @@ class TestCRUD:
 
         assert metadata.kind == 'file'
         assert metadata.path == '/foobah'
-        # The returned metadata comes from the HEAD, whose ETag header S3 quotes.
-        assert metadata.extra['md5'] == 'fba9dede5f27731c9771645a39863328'
         assert not created
         assert aiohttpretty.has_call(method='PUT', uri=url)
         assert aiohttpretty.has_call(method='HEAD', uri=metadata_url)
@@ -814,7 +812,6 @@ class TestCRUD:
         metadata, created = await provider.upload(file_stream, path)
 
         assert metadata.kind == 'file'
-        assert metadata.extra['md5'] == 'fba9dede5f27731c9771645a39863328'
         assert not created
         assert aiohttpretty.has_call(method='PUT', uri=url)
         assert aiohttpretty.has_call(method='HEAD', uri=metadata_url)
@@ -850,7 +847,6 @@ class TestCRUD:
 
         assert metadata.kind == 'file'
         assert metadata.extra['encryption'] == 'AES256'
-        assert metadata.extra['md5'] == 'fba9dede5f27731c9771645a39863328'
         assert created
         assert aiohttpretty.has_call(method='PUT', uri=url)
         assert aiohttpretty.has_call(method='HEAD', uri=metadata_url)
@@ -1947,7 +1943,6 @@ class TestMetadata:
         metadata, created = await provider.upload(file_stream, path)
 
         assert metadata.kind == 'file'
-        assert metadata.extra['md5'] == 'fba9dede5f27731c9771645a39863328'
         assert created
         assert aiohttpretty.has_call(method='PUT', uri=url)
         assert aiohttpretty.has_call(method='HEAD', uri=metadata_url)

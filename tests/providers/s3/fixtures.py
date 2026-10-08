@@ -95,7 +95,6 @@ def file_header_metadata():
         'Content-Length': '9001',
         'Last-Modified': 'SomeTime',
         'Content-Type': 'binary/octet-stream',
-        # S3 quotes the ETag header, and names it `ETag`.
         'ETag': '"fba9dede5f27731c9771645a39863328"',
         'x-amz-server-side-encryption': 'AES256'
     }
@@ -110,7 +109,7 @@ def file_metadata_headers_object(file_header_metadata):
 def file_metadata_object():
     content = OrderedDict(Key='my-image.jpg',
                           LastModified='2009-10-12T17:50:30.000Z',
-                          ETag="fba9dede5f27731c9771645a39863328",
+                          ETag='"fba9dede5f27731c9771645a39863328"',
                           Size='434234',
                           StorageClass='STANDARD')
 

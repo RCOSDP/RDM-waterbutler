@@ -9,12 +9,6 @@ def strip_char(string, chars):
     return string
 
 
-# GRDM: S3 returns the ETag quoted, so strip the quotes here to keep a listing and a single
-# fetch of the same object reporting the same value.  A multipart ETag keeps its `-<parts>`.
-def strip_etag_quotes(etag):
-    return etag.replace('"', '')
-
-
 class S3Metadata(metadata.BaseMetadata):
 
     @property
@@ -76,10 +70,11 @@ class S3FileMetadataHeaders(S3Metadata, metadata.BaseFileMetadata):
     @property
     def etag(self):
         # ETag is used in boto3/aiobotocore, Etag is used in boto
+        # GRDM: S3 quotes the ETag header, so strip the quotes to match S3FileMetadata.
         if 'ETag' in self.raw:
-            return strip_etag_quotes(self.raw['ETag'])
+            return self.raw['ETag'].replace('"', '')
         elif 'Etag' in self.raw:
-            return strip_etag_quotes(self.raw['Etag'])
+            return self.raw['Etag'].replace('"', '')
         return ''
 
     @property
@@ -118,11 +113,11 @@ class S3FileMetadata(S3Metadata, metadata.BaseFileMetadata):
 
     @property
     def etag(self):
-        return strip_etag_quotes(self.raw['ETag'])
+        return self.raw['ETag'].replace('"', '')
 
     @property
     def extra(self):
-        md5 = self.etag
+        md5 = self.raw['ETag'].replace('"', '')
         return {
             'md5': md5,
             'hashes': {
@@ -192,5 +187,5 @@ class S3Revision(metadata.BaseFileRevisionMetadata):
     @property
     def extra(self):
         return {
-            'md5': strip_etag_quotes(self.raw['ETag'])
+            'md5': self.raw['ETag'].replace('"', '')
         }
