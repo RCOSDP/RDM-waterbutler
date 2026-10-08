@@ -1,6 +1,12 @@
+from collections import OrderedDict
+
 import pytest
 
-from waterbutler.providers.s3.metadata import S3Metadata, S3FileMetadataHeaders
+from waterbutler.providers.s3.metadata import (
+    S3Metadata,
+    S3FileMetadata,
+    S3FileMetadataHeaders,
+)
 from tests.providers.s3.fixtures import (
     file_metadata_headers_object,
     file_header_metadata,
@@ -75,6 +81,47 @@ class TestFileMetadata:
           'upload': 'http://localhost:7777/v1/resources/guid0/providers/s3/my-image.jpg?kind=file'}
 
         assert file_metadata_object._json_api_links('guid0') == links
+
+
+class TestEtagConsistency:
+    """One object has to report one ETag, whether it was seen through HEAD or ListObjects.
+
+    S3 quotes the ETag in the HEAD header and in the ListObjects body alike.  If only one of the
+    two readers strips the quotes, ``md5`` and the ``etag`` that ``serialized()`` hashes differ
+    for one and the same object, so anything comparing a listing against a stat -- the dedup of
+    an upload, a client cache -- sees a change that never happened.
+    """
+
+    @pytest.mark.parametrize('quoted_etag', ['"abc"', '"abc-4"'])
+    def test_headers_and_listing_agree(self, quoted_etag):
+        headers = S3FileMetadataHeaders('my-image.jpg', {
+            'Content-Length': '434234',
+            'Last-Modified': '2009-10-12T17:50:30.000Z',
+            'Content-Type': 'binary/octet-stream',
+            'ETag': quoted_etag,
+        })
+        listing = S3FileMetadata(OrderedDict(
+            Key='my-image.jpg',
+            LastModified='2009-10-12T17:50:30.000Z',
+            ETag=quoted_etag,
+            Size='434234',
+            StorageClass='STANDARD',
+        ))
+
+        assert headers.etag == listing.etag
+        assert headers.extra['md5'] == listing.extra['md5']
+        assert headers.extra['hashes']['md5'] == listing.extra['hashes']['md5']
+        assert headers.serialized()['etag'] == listing.serialized()['etag']
+
+        # A multipart ETag keeps its `-<parts>` suffix; only the quotes come off.
+        assert headers.etag == quoted_etag.strip('"')
+
+    def test_boto_spelling_of_the_header_is_stripped_too(self):
+        """``Etag`` is what boto handed back, and the reader still accepts it."""
+        headers = S3FileMetadataHeaders('my-image.jpg', {'Etag': '"abc"'})
+
+        assert headers.etag == 'abc'
+        assert headers.extra['md5'] == 'abc'
 
 
 class TestFolderMetadata:
