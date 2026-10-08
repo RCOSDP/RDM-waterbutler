@@ -1,3 +1,5 @@
+from urllib.parse import unquote
+
 import pytest
 
 from waterbutler.providers.bitbucket.path import BitbucketPath
@@ -97,6 +99,33 @@ class TestBitbucketMetadata:
                     'branch={}'.format(full_path, BRANCH),
             'new_folder': None,
         }
+
+    def test_file_materialized_path_is_decoded(self, file_metadata, owner, repo):
+        # materialized_path must be the decoded, human-readable name (used for
+        # display), while path stays percent-encoded (used to build URLs) --
+        # they must differ for names containing characters that need encoding.
+        name = 'テスト.txt'
+        subdir = 'フォルダ1/フォルダ2'
+        full_path = '/{}/{}'.format(subdir, name)
+        path = BitbucketPath(full_path, _ids=[(COMMIT_SHA, BRANCH) for _ in full_path.split('/')])
+
+        metadata = BitbucketFileMetadata(file_metadata, path, owner=owner, repo=repo)
+
+        assert metadata.materialized_path == full_path
+        assert metadata.path != full_path
+        assert unquote(metadata.path) == full_path
+
+    def test_folder_materialized_path_is_decoded(self, folder_metadata, owner, repo):
+        name = 'サブフォルダ'
+        subdir = 'フォルダ1/フォルダ2'
+        full_path = '/{}/{}/'.format(subdir, name)
+        path = BitbucketPath(full_path, _ids=[(None, BRANCH) for _ in full_path.rstrip('/').split('/')])
+
+        metadata = BitbucketFolderMetadata(folder_metadata, path, owner=owner, repo=repo)
+
+        assert metadata.materialized_path == full_path
+        assert metadata.path != full_path
+        assert unquote(metadata.path) == full_path
 
     def test_build_revision_metadata(self, revision_metadata):
 

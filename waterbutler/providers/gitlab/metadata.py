@@ -24,6 +24,10 @@ class BaseGitLabMetadata(metadata.BaseMetadata):
         return self.build_path()
 
     @property
+    def materialized_path(self) -> str:
+        return str(self._path_obj)
+
+    @property
     def name(self) -> str:
         return self._path_obj.name
 

@@ -33,6 +33,10 @@ class BaseBitbucketMetadata(metadata.BaseMetadata):
         return self.build_path()
 
     @property
+    def materialized_path(self):
+        return str(self._path_obj)
+
+    @property
     def name(self):
         return self._path_obj.name
 
