@@ -38,7 +38,9 @@ from tests.providers.s3compat.test_provider import (
     generic_http_404_resp,
     list_parts_resp_empty,
     list_parts_resp_not_empty,
-    upload_parts_headers_list
+    upload_parts_headers_list,
+    generate_url_helper,
+    folder_metadata_paginated,
 )
 
 @pytest.fixture
@@ -49,7 +51,7 @@ def base_prefix():
 @pytest.fixture
 def settings(base_prefix):
     return {
-        'bucket': 'that kerning',
+        'bucket': 'that_kerning',
         'prefix': base_prefix,
         'encrypt_uploads': False
     }
