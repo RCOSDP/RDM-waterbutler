@@ -22,7 +22,7 @@
 
 ### Compatibility
 
-WaterButler is compatible with Python 3.6.
+WaterButler is compatible with Python 3.13.
 
 ### Documentation
 
@@ -30,40 +30,16 @@ Documentation available at https://waterbutler.readthedocs.io/en/latest/
 
 ### Setting up
 
-In order to run WaterButler, you must create a Python 3.6-based virtualenv for it.
-
-For MacOSX, you can install the latest version of Python3 using:
-
-```bash
-brew install python3
-```
-
-For Ubuntu users:
+WaterButler uses [Poetry](https://python-poetry.org/) to manage its dependencies. With Python 3.13 and
+Poetry installed, run the following in your checkout:
 
 ```bash
-apt-get install python3.6
+poetry install
+poetry run invoke server
 ```
 
-After completing the installation of Python 3.6, you must create a virtual environment. This can be done with the following commands:
-
-```bash
-pip install virtualenv
-pip install virtualenvwrapper
-mkvirtualenv --python=python3.6 waterbutler
-
-pip install setuptools=37.0.0
-pip install invoke==0.13.0
-
-invoke install
-invoke server
-```
-
-The above code will get the virtualenv up and running for the first time.  After the initial setup, you can run waterbutler by running:
-
-```bash
-workon waterbutler
-invoke server
-```
+Poetry creates and manages a virtual environment for the project. To run commands inside it without
+the `poetry run` prefix, use `poetry shell` or activate the environment reported by `poetry env info`.
 
 Some tasks also require a running celery worker.  You will need to install `rabbitmq` and run a server:
 
@@ -118,16 +94,9 @@ If you then wanted to update the GitHub commit message WaterButler submits when 
 Before running the tests, you will need to install some additional requirements. In your checkout, run:
 
 ```bash
-workon waterbutler
-invoke install --develop
-invoke test
+poetry install --with dev
+poetry run invoke test
 ```
-
-### Known issues
-
-- **Updated, 2018-01-02:** *WB has been updated to work with setuptools==37.0.0, as of WB release v0.37. The following issue should not happen for new installs, but may occur if you downgrade to an older version.*  Running `invoke install -d` with setuptools v31 or greater can break WaterButler.  The symptom error message is: `"AttributeError: module 'waterbutler' has no attribute '__version__'"`.  If you encounter this, you will need to remove the file `waterbutler-nspkg.pth` from your virtualenv directory, run `pip install setuptools==30.4.0`, then re-run `invoke install -d`.
-
-- `invoke $command` results in `'$command' did not receive all required positional arguments!`: this error message occurs when trying to run WB v0.30.0+ with `invoke<0.13.0`.  Run `pip install invoke==0.13.0`, then retry your command.
 
 ### License
 

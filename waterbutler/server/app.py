@@ -25,12 +25,12 @@ def sig_handler(sig, frame):
     io_loop = asyncio.get_event_loop()
 
     def stop_loop():
-        if len(asyncio.Task.all_tasks(io_loop)) == 0:
+        if len(asyncio.all_tasks(io_loop)) == 0:
             io_loop.stop()
         else:
             io_loop.call_later(1, stop_loop)
 
-    io_loop.add_callback_from_signal(stop_loop)
+    io_loop.call_soon_threadsafe(stop_loop)
 
 
 def api_to_handlers(api):
@@ -63,6 +63,9 @@ def make_app(debug):
 
 
 def serve():
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
     app = make_app(server_settings.DEBUG)
 
     ssl_options = None
@@ -83,5 +86,5 @@ def serve():
     logger.info("Listening on {0}:{1}".format(server_settings.ADDRESS, server_settings.PORT))
 
     signal.signal(signal.SIGTERM, partial(sig_handler))
-    asyncio.get_event_loop().set_debug(server_settings.DEBUG)
-    asyncio.get_event_loop().run_forever()
+    loop.set_debug(server_settings.DEBUG)
+    loop.run_forever()

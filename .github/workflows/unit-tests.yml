@@ -19,6 +19,7 @@ jobs:
       contents: read
     outputs:
       image: ${{ steps.meta.outputs.image }}
+      build_image: ${{ steps.meta.outputs.build_image }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -28,9 +29,17 @@ jobs:
         run: |
           docker build -t rdm-wb-test:${{ github.sha }} -f ./Dockerfile .
 
+      - name: Build Docker image (build stage, used for unit tests)
+        run: |
+          docker build --target build -t rdm-wb-build:${{ github.sha }} -f ./Dockerfile .
+
       - name: Save Docker image
         run: |
           docker save rdm-wb-test:${{ github.sha }} -o /tmp/rdm-wb-image.tar
+
+      - name: Save Docker image (build stage)
+        run: |
+          docker save rdm-wb-build:${{ github.sha }} -o /tmp/rdm-wb-build-image.tar
 
       - name: Upload Docker image artifact
         uses: actions/upload-artifact@v4
@@ -39,9 +48,129 @@ jobs:
           path: /tmp/rdm-wb-image.tar
           retention-days: 1
 
+      - name: Upload Docker image artifact (build stage)
+        uses: actions/upload-artifact@v4
+        with:
+          name: rdm-wb-build-image
+          path: /tmp/rdm-wb-build-image.tar
+          retention-days: 1
+
       - name: Export image reference
         id: meta
-        run: echo "image=rdm-wb-test:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "image=rdm-wb-test:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          echo "build_image=rdm-wb-build:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
+  scan-image:
+    runs-on: ubuntu-latest
+    needs: build-image
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download Docker image artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: rdm-wb-image
+          path: /tmp
+
+      - name: Scan Docker image with Trivy
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          input: /tmp/rdm-wb-image.tar
+          scanners: vuln
+          vuln-type: os,library
+          format: json
+          output: trivy-results.json
+          exit-code: '0'
+          list-all-pkgs: 'true'
+
+      - name: Convert Trivy report to SARIF
+        env:
+          TRIVY_SCANNERS: ''
+        run: |
+          trivy convert \
+            --format sarif \
+            --output trivy-results.sarif \
+            trivy-results.json
+
+      - name: Render vulnerability summary
+        env:
+          IMAGE: ${{ needs.build-image.outputs.image }}
+          COMMIT: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          python3 .github/scripts/ci/render-trivy-report.py \
+            --input trivy-results.json \
+            --output trivy-report.md \
+            --image "$IMAGE" \
+            --commit "$COMMIT" \
+            --run-url "$RUN_URL"
+          tee -a "$GITHUB_STEP_SUMMARY" < trivy-report.md
+
+      - name: Upload vulnerability reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-image-scan
+          path: |
+            trivy-results.json
+            trivy-results.sarif
+            trivy-report.md
+          retention-days: 14
+
+      - name: Upload SARIF to GitHub Code Scanning
+        if: >-
+          github.event_name != 'pull_request' ||
+          github.event.pull_request.head.repo.full_name == github.repository
+        uses: github/codeql-action/upload-sarif@bce182f857edf1feab116e9795a3393d21977282 # v4
+        with:
+          sarif_file: trivy-results.sarif
+          category: trivy-container-image
+
+  comment-image-scan:
+    runs-on: ubuntu-latest
+    needs: scan-image
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Download vulnerability summary
+        uses: actions/download-artifact@v4
+        with:
+          name: trivy-image-scan
+
+      - name: Create or update PR comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          comments_endpoint="repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments"
+          comment_id="$({
+            gh api --paginate "$comments_endpoint" --jq \
+              '.[] | select(.user.login == "github-actions[bot]" and (.body | contains("<!-- trivy-image-scan -->"))) | .id'
+          } | sed -n '1p')"
+          if [[ -n "$comment_id" ]]; then
+            gh api \
+              --method PATCH \
+              "repos/${GITHUB_REPOSITORY}/issues/comments/${comment_id}" \
+              -F body=@trivy-report.md
+          else
+            gh api \
+              --method POST \
+              "$comments_endpoint" \
+              -F body=@trivy-report.md
+          fi
 
   tests:
     runs-on: ubuntu-latest
@@ -57,20 +186,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download Docker image artifact
+      - name: Download Docker image artifact (build stage)
         uses: actions/download-artifact@v4
         with:
-          name: rdm-wb-image
+          name: rdm-wb-build-image
           path: /tmp
 
       - name: Load Docker image
         run: |
-          docker load -i /tmp/rdm-wb-image.tar
+          docker load -i /tmp/rdm-wb-build-image.tar
 
       - name: Run matrix job
         env:
           TEST_BUILD: ${{ matrix.test_build }}
-          WB_TEST_IMAGE: ${{ needs.build-image.outputs.image }}
+          WB_TEST_IMAGE: ${{ needs.build-image.outputs.build_image }}
         run: |
           bash .github/scripts/ci/run-tests.sh "$TEST_BUILD"
 

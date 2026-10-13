@@ -3,6 +3,7 @@ import typing
 import hashlib
 
 import furl
+from urllib import parse
 
 from waterbutler.core import utils
 from waterbutler.server import settings
@@ -93,7 +94,9 @@ class BaseMetadata(metaclass=abc.ABCMeta):
         # percent-encodes the trailing slash. Instead, turn folders into a list of (path_id, ''),
         # and let furl add the slash for us.  The [1:] is because path always begins with a slash,
         # meaning the first entry is always ''.
-        segments += self.path.split('/')[1:]
+        # Provider paths may already be percent-encoded (e.g. GitLab). furl 2 encodes every
+        # segment on output, so decode them first to avoid double encoding.
+        segments += [parse.unquote(segment) for segment in self.path.split('/')[1:]]
         url.path.segments.extend(segments)
 
         return url.url

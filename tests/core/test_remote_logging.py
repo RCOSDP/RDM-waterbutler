@@ -1,6 +1,6 @@
 import time
 
-import mock
+from unittest import mock
 import pytest
 
 from waterbutler.core import remote_logging

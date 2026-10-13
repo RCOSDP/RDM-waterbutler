@@ -132,7 +132,7 @@ class Index(object):
     raw = None
     parent: Self = None
 
-    def __init__(self, client, desc, parent: Self=None):
+    def __init__(self, client, desc, parent: Self = None):
         self.client = client
         self.parent = parent
         self.raw = desc

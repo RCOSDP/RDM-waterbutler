@@ -1,0 +1,119 @@
+[tool.poetry]
+name = "waterbutler"
+version = "20.0.2"  # TODO: get version from waterbutler/version.py
+description = "WaterButler Storage Server"
+authors = ["Center for Open Science <contact@cos.io>"]
+readme = "README.md"
+license = "Apache License 2.0"
+
+[tool.poetry.dependencies]
+python = "^3.13"
+aiocontextvars = "0.2.2"
+aiohttp = "^3.14.0"
+boto3 = "^1.37.0"
+celery = "5.6.3"
+celery-amqp-backend = "^1.2.0"
+certifi = "2026.7.22"
+cryptography = "50.0.2"
+furl = "2.0.0"
+google-auth = "2.60.0"
+humanfriendly = "10.0"
+invoke = "2.2.0"
+multidict = ">=6.0.0"
+newrelic = "13.6.1"
+oauthlib = "4.0.0"
+pyjwe = "1.0.0"
+pyjwt = "2.15.1"
+python-dateutil = "2.9.0"
+pytz = "2026.5"
+sentry-sdk = "2.71.0"
+setuptools = "^83.0.0"
+stevedore = "5.9.1"
+tornado = "6.5.10"
+xmltodict = "1.0.4"
+yarl = "1.25.1"
+
+# OpenStack Swift
+python-keystoneclient = "6.0.0"
+python-swiftclient = "4.11.0"
+
+# Azure Blob Storage
+azure-storage = "0.33.0"
+
+# WEKO
+typing-extensions = "4.16.0"
+
+[tool.poetry.group.dev]
+# "dev" dependency group relevant only for local dev:
+optional = true
+[tool.poetry.group.dev.dependencies]
+colorlog = "6.9.0"
+coveralls = "3.3.1"
+flake8 = "7.1.2"
+ipdb = "0.13.13"
+ipython = "8.32.0"
+mypy = "1.15.0"
+mccabe = "0.7.0"
+moto = "5.2.3"
+pycodestyle = "2.12.1"
+pydevd = "3.3.0"
+pyflakes = "3.2.0"
+pytest = "8.3.5"
+pytest-asyncio = "0.26.0"
+pytest-cov = "4.1.0"
+aiohttpretty = {git = "https://github.com/CenterForOpenScience/aiohttpretty.git", branch = "release/ahp-25.0.0"}
+pytest-celery = "^1.2.0"
+redis = "5.2.1"
+
+[tool.poetry.group.docs]
+# "docs" dependency group relevant only for building docs:
+optional = true
+[tool.poetry.group.docs.dependencies]
+sphinx = ">=8.2.3"
+sphinx-autobuild = ">=2024.10.3"
+sphinx-rtd-theme = ">=3.0.2"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.plugins."waterbutler.auth"]
+osf = "waterbutler.auth.osf:OsfAuthHandler"
+
+[tool.poetry.plugins."waterbutler.providers"]
+cloudfiles = "waterbutler.providers.cloudfiles:CloudFilesProvider"
+dropbox = "waterbutler.providers.dropbox:DropboxProvider"
+figshare = "waterbutler.providers.figshare:FigshareProvider"
+filesystem = "waterbutler.providers.filesystem:FileSystemProvider"
+github = "waterbutler.providers.github:GitHubProvider"
+gitlab = "waterbutler.providers.gitlab:GitLabProvider"
+bitbucket = "waterbutler.providers.bitbucket:BitbucketProvider"
+osfstorage = "waterbutler.providers.osfstorage:OSFStorageProvider"
+owncloud = "waterbutler.providers.owncloud:OwnCloudProvider"
+s3 = "waterbutler.providers.s3:S3Provider"
+dataverse = "waterbutler.providers.dataverse:DataverseProvider"
+box = "waterbutler.providers.box:BoxProvider"
+googledrive = "waterbutler.providers.googledrive:GoogleDriveProvider"
+onedrive = "waterbutler.providers.onedrive:OneDriveProvider"
+googlecloud = "waterbutler.providers.googlecloud:GoogleCloudProvider"
+swift = "waterbutler.providers.swift:SwiftProvider"
+azureblobstorage = "waterbutler.providers.azureblobstorage:AzureBlobStorageProvider"
+weko = "waterbutler.providers.weko:WEKOProvider"
+s3compat = "waterbutler.providers.s3compat:S3CompatProvider"
+s3compatsigv4 = "waterbutler.providers.s3compatsigv4:S3CompatSigV4Provider"
+s3compatb3 = "waterbutler.providers.s3compatb3:S3CompatB3Provider"
+nextcloud = "waterbutler.providers.nextcloud:NextcloudProvider"
+iqbrims = "waterbutler.providers.iqbrims:IQBRIMSProvider"
+dropboxbusiness = "waterbutler.providers.dropboxbusiness:DropboxBusinessProvider"
+nextcloudinstitutions = "waterbutler.providers.nextcloudinstitutions:NextcloudInstitutionsProvider"
+s3compatinstitutions = "waterbutler.providers.s3compatinstitutions:S3CompatInstitutionsProvider"
+ociinstitutions = "waterbutler.providers.ociinstitutions:OCIInstitutionsProvider"
+onedrivebusiness = "waterbutler.providers.onedrivebusiness:OneDriveBusinessProvider"
+rushfiles = "waterbutler.providers.rushfiles:RushFilesProvider"
+
+[tool.pytest.ini_options]
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "celery: marks tests needing celery mods",
+    "aiohttpretty: mark tests to activate aiohttpretty",
+]

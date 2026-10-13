@@ -1,5 +1,6 @@
 import uuid
 import socket
+import os
 import asyncio
 import inspect  # noqa
 import logging
@@ -156,9 +157,19 @@ class ProviderHandler(core.BaseHandler, CreateMixin, MetadataMixin, MoveCopyMixi
         Only called on PUT when path is to a file
         """
         self.rsock, self.wsock = socket.socketpair()
+        self.rsock.setblocking(False)
+        self.wsock.setblocking(False)
 
-        self.reader, _ = await asyncio.open_unix_connection(sock=self.rsock)
-        _, self.writer = await asyncio.open_unix_connection(sock=self.wsock)
+        self.rfd = os.fdopen(self.rsock.detach(), 'rb', 0)
+        self.wfd = os.fdopen(self.wsock.detach(), 'wb', 0)
+
+        self.reader = asyncio.StreamReader()
+        reader_protocol = asyncio.StreamReaderProtocol(self.reader)
+        loop = asyncio.get_running_loop()
+        await loop.connect_read_pipe(lambda: reader_protocol, self.rfd)
+
+        writer_transport, _ = await loop.connect_write_pipe(asyncio.Protocol, self.wfd)
+        self.writer = asyncio.StreamWriter(writer_transport, reader_protocol, self.reader, loop)
 
         self.stream = RequestStreamReader(self.request, self.reader)
         self.uploader = asyncio.ensure_future(self.provider.upload(self.stream, self.target_path))
