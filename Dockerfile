@@ -1,12 +1,9 @@
-FROM python:3.6-slim-buster
+FROM python:3.13-slim
 
 RUN usermod -d /home www-data && chown www-data:www-data /home
 
 # Install dependancies
-# Update sources for Debian Buster (EOL) to use archive
-RUN echo "deb https://archive.debian.org/debian buster main" > /etc/apt/sources.list \
-    && echo "deb https://archive.debian.org/debian-security buster/updates main" >> /etc/apt/sources.list \
-    && apt-get update \
+RUN apt-get update \
     && apt-get install -y \
         git \
         libevent-dev \
@@ -17,7 +14,6 @@ RUN echo "deb https://archive.debian.org/debian buster main" > /etc/apt/sources.
         build-essential \
         libssl-dev \
         libffi-dev \
-        python-dev \
         gnupg2 \
         # grab gosu for easy step-down from root
         gosu \
@@ -28,23 +24,25 @@ RUN echo "deb https://archive.debian.org/debian buster main" > /etc/apt/sources.
 RUN mkdir -p /code
 WORKDIR /code
 
-RUN pip install -U pip==20.2
-RUN pip install setuptools==37.0.0
+ENV POETRY_NO_INTERACTION=1
+ENV POETRY_VIRTUALENVS_CREATE=0
+ENV POETRY_VIRTUALENVS_IN_PROJECT=1
 
-COPY ./requirements.txt /code/
-
-RUN pip install --no-cache-dir -r /code/requirements.txt
+COPY pyproject.toml poetry.lock /code/
+RUN pip install poetry==2.1.2
+RUN pip install setuptools==80.1.0
+RUN poetry install --no-root --without=docs
 
 # Copy the rest of the code over
 COPY ./ /code/
 
 ARG GIT_COMMIT=
-ENV GIT_COMMIT ${GIT_COMMIT}
+ENV GIT_COMMIT=${GIT_COMMIT}
 
-RUN python setup.py develop
+RUN poetry install --without docs
 
 RUN sed -i -e 's/CipherString = DEFAULT@SECLEVEL=2/CipherString = DEFAULT@SECLEVEL=1/g' /etc/ssl/openssl.cnf
 
 EXPOSE 7777
 
-CMD ["gosu", "www-data", "invoke", "server"]
+CMD ["gosu", "www-data", "python3", "-m", "invoke", "server"]

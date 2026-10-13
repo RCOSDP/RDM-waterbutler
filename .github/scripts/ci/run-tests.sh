@@ -12,7 +12,7 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 cd "$REPO_ROOT"
 
 read -r -d '' container_script <<'BASH' || true
-pip install -r dev-requirements.txt
+poetry install --with dev
 invoke test
 BASH
 
