@@ -7,7 +7,6 @@ import logging
 import weakref
 import functools
 import itertools
-from urllib import parse
 
 import furl
 import aiohttp
@@ -59,20 +58,13 @@ def throttle(concurrency=10, interval=1):
 
 
 def build_url(base, *segments, **query):
-    url = furl.furl(base)
-    # Filters return generators
-    # Cast to list to force "spin" it
+    url = furl.furl(base, args=query)
+    # furl 2 treats assigned segments as decoded values and encodes them on output,
+    # so segments must not be quoted beforehand
     url.path.segments = list(filter(
         lambda segment: segment,
-        map(
-            # Furl requires everything to be quoted or not, no mixtures allowed
-            # prequote everything so %signs don't break everything
-            lambda segment: parse.quote(segment.strip('/')),
-            # Include any segments of the original url, effectively list+list but returns a generator
-            itertools.chain(url.path.segments, segments)
-        )
+        itertools.chain(url.path.segments, [segment.strip('/') for segment in segments])
     ))
-    url.args = query
     return url.url
 
 
