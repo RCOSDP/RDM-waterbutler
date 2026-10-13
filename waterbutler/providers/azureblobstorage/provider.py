@@ -235,7 +235,7 @@ class AzureBlobStorageProvider(provider.BaseProvider):
 
             async def sub_upload():
                 while True:
-                    with await lock:
+                    async with lock:
                         sub_stream = ByteStream(await stream.read(MAX_UPLOAD_BLOCK_SIZE))
                         if sub_stream.size == 0:
                             return
@@ -246,7 +246,10 @@ class AzureBlobStorageProvider(provider.BaseProvider):
                     await self._put_block(sub_stream, path, block_id)
 
             tasks = [asyncio.ensure_future(sub_upload()) for _ in range(UPLOAD_PARALLEL_NUM)]
-            await asyncio.wait(tasks)
+            done, _ = await asyncio.wait(tasks)
+            for task in done:
+                # asyncio.wait does not raise task failures, so surface them here
+                task.result()
 
             await self._put_block_list(path, block_id_list)
 
