@@ -1,6 +1,12 @@
 import os
 
-from waterbutler.core import metadata
+from waterbutler.core import metadata, utils
+
+
+def strip_char(string, chars):
+    if string.startswith(chars):
+        return string[len(chars):]
+    return string
 
 
 class S3Metadata(metadata.BaseMetadata):
@@ -24,31 +30,52 @@ class S3FileMetadataHeaders(S3Metadata, metadata.BaseFileMetadata):
 
     @property
     def path(self):
-        return '/' + self._path
+        return '/' + strip_char(self._path, self.raw.get('base_folder', ''))
 
     @property
     def size(self):
-        return self.raw['Content-Length']
+        if 'ContentLength' in self.raw:
+            return self.raw['ContentLength']
+        elif 'Content-Length' in self.raw:
+            return self.raw['Content-Length']
+        return None
 
     @property
     def content_type(self):
-        return self.raw['Content-Type']
+        if 'ContentType' in self.raw:
+            return self.raw['ContentType']
+        elif 'Content-Type' in self.raw:
+            return self.raw['Content-Type']
+        return ''
 
     @property
     def modified(self):
-        return self.raw['Last-Modified']
+        if 'LastModified' in self.raw:
+            return str(self.raw['LastModified'])
+        elif 'Last-Modified' in self.raw:
+            return str(self.raw['Last-Modified'])
+        return None
 
     @property
     def created_utc(self):
         return None
 
     @property
+    def modified_utc(self) -> str:
+        """ Date the file was last modified, as reported by the provider,
+        converted to UTC, in format (YYYY-MM-DDTHH:MM:SS+00:00). """
+        last_modified = self.modified
+        return utils.normalize_datetime(str(last_modified)) if last_modified else last_modified
+
+    @property
     def etag(self):
-        return self.raw['Etag'].replace('"', '')
+        # Header names differ between storages and client libraries
+        etag_value = self.raw.get('ETag', self.raw.get('Etag', ''))
+        return etag_value.replace('"', '')
 
     @property
     def extra(self):
-        md5 = self.raw['Etag'].replace('"', '')
+        md5 = self.etag
         return {
             'md5': md5,
             'encryption': self.raw.get('x-amz-server-side-encryption', ''),
@@ -62,7 +89,7 @@ class S3FileMetadata(S3Metadata, metadata.BaseFileMetadata):
 
     @property
     def path(self):
-        return '/' + self.raw['Key']
+        return '/' + strip_char(self.raw['Key'], self.raw.get('base_folder', ''))
 
     @property
     def size(self):
@@ -70,7 +97,7 @@ class S3FileMetadata(S3Metadata, metadata.BaseFileMetadata):
 
     @property
     def modified(self):
-        return self.raw['LastModified']
+        return str(self.raw['LastModified'])
 
     @property
     def created_utc(self):
@@ -111,7 +138,7 @@ class S3FolderKeyMetadata(S3Metadata, metadata.BaseFolderMetadata):
 
     @property
     def path(self):
-        return '/' + self.raw['Key']
+        return '/' + strip_char(self.raw['Key'], self.raw.get('base_folder', ''))
 
 
 class S3FolderMetadata(S3Metadata, metadata.BaseFolderMetadata):
@@ -122,6 +149,8 @@ class S3FolderMetadata(S3Metadata, metadata.BaseFolderMetadata):
 
     @property
     def path(self):
+        if self.raw.get('base_folder', ''):
+            return '/' + strip_char(self.raw['Prefix'], self.raw.get('base_folder', ''))
         return '/' + self.raw['Prefix']
 
     @property
@@ -142,13 +171,14 @@ class S3Revision(metadata.BaseFileRevisionMetadata):
 
     @property
     def version(self):
-        if self.raw['IsLatest'] == 'true':
+        is_latest = self.raw['IsLatest']
+        if is_latest in [True, 'true']:
             return 'Latest'
         return self.raw['VersionId']
 
     @property
     def modified(self):
-        return self.raw['LastModified']
+        return str(self.raw['LastModified'])
 
     @property
     def extra(self):
