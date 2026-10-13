@@ -3,7 +3,7 @@ import pytest
 from tests import utils
 
 import boto3
-from moto import mock_s3
+from moto import mock_aws
 
 from waterbutler.providers.ociinstitutions import OCIInstitutionsProvider
 from tests.providers.s3compatb3.test_provider import (
@@ -47,7 +47,7 @@ def settings(base_prefix):
 def provider(auth, credentials, settings):
     # return OCIInstitutionsProvider(auth, credentials, settings)
     boto3.DEFAULT_SESSION = None
-    with mock_s3():
+    with mock_aws():
         provider = OCIInstitutionsProvider(auth, credentials, settings)
         s3client = boto3.client('s3')
         s3client.create_bucket(Bucket=provider.bucket.name)

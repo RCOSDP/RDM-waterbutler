@@ -190,7 +190,7 @@ class AzureBlobStorageProvider(provider.BaseProvider):
     async def download(self, path, accept_url=False, version=None, range=None, **kwargs):
         """
         :param str path: Path to the key you want to download
-        :param dict \*\*kwargs: Additional arguments that are ignored
+        :param dict **kwargs: Additional arguments that are ignored
         :rtype: :class:`waterbutler.core.streams.ResponseStreamReader`
         :raises: :class:`waterbutler.core.exceptions.DownloadError`
         """

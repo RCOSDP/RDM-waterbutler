@@ -18,4 +18,4 @@ BASH
 
 docker run --rm -t \
     -e TEST_BUILD="$TEST_BUILD" \
-    ${WB_TEST_IMAGE} bash -lc "$container_script"
+    ${WB_TEST_IMAGE} bash -c "$container_script"

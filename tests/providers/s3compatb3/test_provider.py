@@ -11,7 +11,7 @@ from unittest import mock
 import asyncio
 
 import boto3
-from moto import mock_s3
+from moto import mock_aws
 
 import aiohttpretty
 
@@ -59,7 +59,7 @@ def mock_time(monkeypatch):
 def provider(auth, credentials, settings):
     # return S3CompatB3Provider(auth, credentials, settings)
     boto3.DEFAULT_SESSION = None
-    with mock_s3():
+    with mock_aws():
         provider = S3CompatB3Provider(auth, credentials, settings)
         s3client = boto3.client('s3')
         s3client.create_bucket(Bucket=provider.bucket.name)
@@ -379,14 +379,14 @@ class TestValidatePath:
 
         assert WaterButlerPath('/') == await provider.validate_v1_path('/')
 
-        with mock_s3():
+        with mock_aws():
             boto3.DEFAULT_SESSION = None
             s3client = boto3.client('s3')
             s3client.create_bucket(Bucket=provider.bucket.name)
             with pytest.raises(exceptions.NotFoundError) as exc:
                  await provider.validate_v1_path('/' + file_path)
 
-        with mock_s3():
+        with mock_aws():
             boto3.DEFAULT_SESSION = None
             s3client = boto3.client('s3')
             s3client.create_bucket(Bucket=provider.bucket.name)
@@ -406,14 +406,14 @@ class TestValidatePath:
         if prefix:
             full_path = prefix + full_path
 
-        with mock_s3():
+        with mock_aws():
             boto3.DEFAULT_SESSION = None
             s3client = boto3.client('s3')
             s3client.create_bucket(Bucket=provider.bucket.name)
             with pytest.raises(exceptions.NotFoundError) as exc:
                 await provider.validate_v1_path('/' + folder_path + '/')
 
-        with mock_s3():
+        with mock_aws():
             boto3.DEFAULT_SESSION = None
             s3client = boto3.client('s3')
             s3client.create_bucket(Bucket=provider.bucket.name)
@@ -533,7 +533,7 @@ class TestCRUD:
         query_parameters = {'Bucket': provider.bucket.name, 'Key': path.full_path}
         url = provider.connection.s3.meta.client.generate_presigned_url('put_object', Params=query_parameters, ExpiresIn=100, HttpMethod='PUT')
         aiohttpretty.register_uri('PUT', url, status=201, headers={'ETag': '"{}"'.format(content_md5)})
-        with mock_s3():
+        with mock_aws():
             boto3.DEFAULT_SESSION = None
             s3client = boto3.client('s3')
             s3client.create_bucket(Bucket=provider.bucket.name)
@@ -618,7 +618,7 @@ class TestCRUD:
             delete_urls.append(delete_url)
             aiohttpretty.register_uri('DELETE', delete_url, status=204)
 
-        with mock_s3():
+        with mock_aws():
             boto3.DEFAULT_SESSION = None
             s3client = boto3.client('s3')
             s3client.create_bucket(Bucket=provider.bucket.name)
@@ -663,7 +663,7 @@ class TestMetadata:
         aiohttpretty.register_uri('GET', url, body=folder_metadata,
                                   headers={'Content-Type': 'application/xml'})
 
-        with mock_s3():
+        with mock_aws():
             boto3.DEFAULT_SESSION = None
             s3client = boto3.client('s3')
             s3client.create_bucket(Bucket=provider.bucket.name)
@@ -690,7 +690,7 @@ class TestMetadata:
         url = provider.connection.s3.meta.client.generate_presigned_url('list_objects', Params=query_parameters, ExpiresIn=100, HttpMethod='GET')
         aiohttpretty.register_uri('GET', url, body=contents_and_self)
 
-        with mock_s3():
+        with mock_aws():
             boto3.DEFAULT_SESSION = None
             s3client = boto3.client('s3')
             s3client.create_bucket(Bucket=provider.bucket.name)
@@ -717,7 +717,7 @@ class TestMetadata:
         aiohttpretty.register_uri('GET', url, body=just_a_folder_metadata,
                                   headers={'Content-Type': 'application/xml'})
 
-        with mock_s3():
+        with mock_aws():
             boto3.DEFAULT_SESSION = None
             s3client = boto3.client('s3')
             s3client.create_bucket(Bucket=provider.bucket.name)
@@ -746,7 +746,7 @@ class TestMetadata:
         aiohttpretty.register_uri('HEAD', url, headers=file_metadata)
         content_md5 = hashlib.md5(file_content).hexdigest()
 
-        with mock_s3():
+        with mock_aws():
             boto3.DEFAULT_SESSION = None
             s3client = boto3.client('s3')
             s3client.create_bucket(Bucket=provider.bucket.name)
@@ -767,7 +767,7 @@ class TestMetadata:
         url = provider.connection.s3.meta.client.generate_presigned_url('head_object', Params=query_parameters, ExpiresIn=100, HttpMethod='HEAD')
         aiohttpretty.register_uri('HEAD', url, status=404)
 
-        with mock_s3():
+        with mock_aws():
             boto3.DEFAULT_SESSION = None
             s3client = boto3.client('s3')
             s3client.create_bucket(Bucket=provider.bucket.name)
@@ -788,7 +788,7 @@ class TestMetadata:
         query_parameters = {'Bucket': provider.bucket.name, 'Key': path.full_path}
         url = provider.connection.s3.meta.client.generate_presigned_url('put_object', Params=query_parameters, ExpiresIn=100, HttpMethod='PUT')
         aiohttpretty.register_uri('PUT', url, status=200, headers={'ETag': '"{}"'.format(content_md5)}),
-        with mock_s3():
+        with mock_aws():
             boto3.DEFAULT_SESSION = None
             s3client = boto3.client('s3')
             s3client.create_bucket(Bucket=provider.bucket.name)
@@ -836,7 +836,7 @@ class TestCreateFolder:
         aiohttpretty.register_uri('GET', url, body=just_a_folder_metadata,
                                   headers={'Content-Type': 'application/xml'})
 
-        with mock_s3():
+        with mock_aws():
             boto3.DEFAULT_SESSION = None
             s3client = boto3.client('s3')
             s3client.create_bucket(Bucket=provider.bucket.name)
@@ -874,7 +874,7 @@ class TestCreateFolder:
         aiohttpretty.register_uri('GET', url, status=404)
         aiohttpretty.register_uri('PUT', create_url, status=403)
 
-        with mock_s3():
+        with mock_aws():
             boto3.DEFAULT_SESSION = None
             s3client = boto3.client('s3')
             s3client.create_bucket(Bucket=provider.bucket.name)
@@ -897,7 +897,7 @@ class TestCreateFolder:
         # aiohttpretty.register_uri('GET', url, params=params, status=403)
         aiohttpretty.register_uri('GET', url, status=403)
 
-        with mock_s3():
+        with mock_aws():
             boto3.DEFAULT_SESSION = None
             s3client = boto3.client('s3')
             s3client.create_bucket(Bucket=provider.bucket.name)
@@ -923,7 +923,7 @@ class TestCreateFolder:
         aiohttpretty.register_uri('GET', url, status=404)
         aiohttpretty.register_uri('PUT', create_url, status=200)
 
-        with mock_s3():
+        with mock_aws():
             boto3.DEFAULT_SESSION = None
             s3client = boto3.client('s3')
             s3client.create_bucket(Bucket=provider.bucket.name)
