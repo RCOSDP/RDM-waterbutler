@@ -19,6 +19,7 @@ jobs:
       contents: read
     outputs:
       image: ${{ steps.meta.outputs.image }}
+      build_image: ${{ steps.meta.outputs.build_image }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -28,9 +29,17 @@ jobs:
         run: |
           docker build -t rdm-wb-test:${{ github.sha }} -f ./Dockerfile .
 
+      - name: Build Docker image (build stage, used for unit tests)
+        run: |
+          docker build --target build -t rdm-wb-build:${{ github.sha }} -f ./Dockerfile .
+
       - name: Save Docker image
         run: |
           docker save rdm-wb-test:${{ github.sha }} -o /tmp/rdm-wb-image.tar
+
+      - name: Save Docker image (build stage)
+        run: |
+          docker save rdm-wb-build:${{ github.sha }} -o /tmp/rdm-wb-build-image.tar
 
       - name: Upload Docker image artifact
         uses: actions/upload-artifact@v4
@@ -39,9 +48,18 @@ jobs:
           path: /tmp/rdm-wb-image.tar
           retention-days: 1
 
+      - name: Upload Docker image artifact (build stage)
+        uses: actions/upload-artifact@v4
+        with:
+          name: rdm-wb-build-image
+          path: /tmp/rdm-wb-build-image.tar
+          retention-days: 1
+
       - name: Export image reference
         id: meta
-        run: echo "image=rdm-wb-test:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "image=rdm-wb-test:${{ github.sha }}" >> "$GITHUB_OUTPUT"
+          echo "build_image=rdm-wb-build:${{ github.sha }}" >> "$GITHUB_OUTPUT"
 
   scan-image:
     runs-on: ubuntu-latest
@@ -168,20 +186,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download Docker image artifact
+      - name: Download Docker image artifact (build stage)
         uses: actions/download-artifact@v4
         with:
-          name: rdm-wb-image
+          name: rdm-wb-build-image
           path: /tmp
 
       - name: Load Docker image
         run: |
-          docker load -i /tmp/rdm-wb-image.tar
+          docker load -i /tmp/rdm-wb-build-image.tar
 
       - name: Run matrix job
         env:
           TEST_BUILD: ${{ matrix.test_build }}
-          WB_TEST_IMAGE: ${{ needs.build-image.outputs.image }}
+          WB_TEST_IMAGE: ${{ needs.build-image.outputs.build_image }}
         run: |
           bash .github/scripts/ci/run-tests.sh "$TEST_BUILD"
 
