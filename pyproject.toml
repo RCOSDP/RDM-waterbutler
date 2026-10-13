@@ -63,6 +63,7 @@ pytest-asyncio = "0.26.0"
 pytest-cov = "4.1.0"
 aiohttpretty = {git = "https://github.com/CenterForOpenScience/aiohttpretty.git", branch = "release/ahp-25.0.0"}
 pytest-celery = "^1.2.0"
+redis = "5.2.1"
 
 [tool.poetry.group.docs]
 # "docs" dependency group relevant only for building docs:
