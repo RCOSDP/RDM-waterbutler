@@ -61,9 +61,9 @@ def provider(auth, credentials, settings):
     boto3.DEFAULT_SESSION = None
     with mock_aws():
         provider = S3CompatB3Provider(auth, credentials, settings)
-        s3client = boto3.client('s3')
+        s3client = boto3.client('s3', region_name='us-east-1')
         s3client.create_bucket(Bucket=provider.bucket.name)
-        s3 = boto3.resource('s3')
+        s3 = boto3.resource('s3', region_name='us-east-1')
         provider.connection.s3 = s3
         provider.bucket = s3.Bucket(provider.bucket.name)
         return provider
@@ -381,14 +381,14 @@ class TestValidatePath:
 
         with mock_aws():
             boto3.DEFAULT_SESSION = None
-            s3client = boto3.client('s3')
+            s3client = boto3.client('s3', region_name='us-east-1')
             s3client.create_bucket(Bucket=provider.bucket.name)
             with pytest.raises(exceptions.NotFoundError) as exc:
                  await provider.validate_v1_path('/' + file_path)
 
         with mock_aws():
             boto3.DEFAULT_SESSION = None
-            s3client = boto3.client('s3')
+            s3client = boto3.client('s3', region_name='us-east-1')
             s3client.create_bucket(Bucket=provider.bucket.name)
             s3client.put_object(Bucket=provider.bucket.name, Key=full_path)
             wb_path_v1 = await provider.validate_v1_path('/' + file_path)
@@ -408,14 +408,14 @@ class TestValidatePath:
 
         with mock_aws():
             boto3.DEFAULT_SESSION = None
-            s3client = boto3.client('s3')
+            s3client = boto3.client('s3', region_name='us-east-1')
             s3client.create_bucket(Bucket=provider.bucket.name)
             with pytest.raises(exceptions.NotFoundError) as exc:
                 await provider.validate_v1_path('/' + folder_path + '/')
 
         with mock_aws():
             boto3.DEFAULT_SESSION = None
-            s3client = boto3.client('s3')
+            s3client = boto3.client('s3', region_name='us-east-1')
             s3client.create_bucket(Bucket=provider.bucket.name)
             s3client.put_object(Bucket=provider.bucket.name, Key=full_path + '/')
             wb_path_v1 = await provider.validate_v1_path('/' + folder_path + '/')
@@ -535,7 +535,7 @@ class TestCRUD:
         aiohttpretty.register_uri('PUT', url, status=201, headers={'ETag': '"{}"'.format(content_md5)})
         with mock_aws():
             boto3.DEFAULT_SESSION = None
-            s3client = boto3.client('s3')
+            s3client = boto3.client('s3', region_name='us-east-1')
             s3client.create_bucket(Bucket=provider.bucket.name)
             s3client.put_object(Bucket=provider.bucket.name, Key=path.full_path)
             metadata, created = await provider.upload(file_stream, path)
@@ -620,7 +620,7 @@ class TestCRUD:
 
         with mock_aws():
             boto3.DEFAULT_SESSION = None
-            s3client = boto3.client('s3')
+            s3client = boto3.client('s3', region_name='us-east-1')
             s3client.create_bucket(Bucket=provider.bucket.name)
             for i in target_items:
                 s3client.put_object(Bucket=provider.bucket.name, Key=i)
@@ -665,7 +665,7 @@ class TestMetadata:
 
         with mock_aws():
             boto3.DEFAULT_SESSION = None
-            s3client = boto3.client('s3')
+            s3client = boto3.client('s3', region_name='us-east-1')
             s3client.create_bucket(Bucket=provider.bucket.name)
             s3client.put_object(Bucket=provider.bucket.name, Key='darp/   photos/')
             s3client.put_object(Bucket=provider.bucket.name, Key='darp/my-image.jpg')
@@ -692,7 +692,7 @@ class TestMetadata:
 
         with mock_aws():
             boto3.DEFAULT_SESSION = None
-            s3client = boto3.client('s3')
+            s3client = boto3.client('s3', region_name='us-east-1')
             s3client.create_bucket(Bucket=provider.bucket.name)
             s3client.put_object(Bucket=provider.bucket.name, Key='thisfolder/')
             s3client.put_object(Bucket=provider.bucket.name, Key='thisfolder/item1')
@@ -719,7 +719,7 @@ class TestMetadata:
 
         with mock_aws():
             boto3.DEFAULT_SESSION = None
-            s3client = boto3.client('s3')
+            s3client = boto3.client('s3', region_name='us-east-1')
             s3client.create_bucket(Bucket=provider.bucket.name)
             s3client.put_object(Bucket=provider.bucket.name, Key='darp/   photos/')
             s3client.put_object(Bucket=provider.bucket.name, Key='darp/my-image.jpg')
@@ -748,7 +748,7 @@ class TestMetadata:
 
         with mock_aws():
             boto3.DEFAULT_SESSION = None
-            s3client = boto3.client('s3')
+            s3client = boto3.client('s3', region_name='us-east-1')
             s3client.create_bucket(Bucket=provider.bucket.name)
             s3client.put_object(Bucket=provider.bucket.name, Key=path.full_path, Body=file_content)
             result = await provider.metadata(path)
@@ -769,7 +769,7 @@ class TestMetadata:
 
         with mock_aws():
             boto3.DEFAULT_SESSION = None
-            s3client = boto3.client('s3')
+            s3client = boto3.client('s3', region_name='us-east-1')
             s3client.create_bucket(Bucket=provider.bucket.name)
             with pytest.raises(exceptions.MetadataError):
                 await provider.metadata(path)
@@ -790,7 +790,7 @@ class TestMetadata:
         aiohttpretty.register_uri('PUT', url, status=200, headers={'ETag': '"{}"'.format(content_md5)}),
         with mock_aws():
             boto3.DEFAULT_SESSION = None
-            s3client = boto3.client('s3')
+            s3client = boto3.client('s3', region_name='us-east-1')
             s3client.create_bucket(Bucket=provider.bucket.name)
             metadata, created = await provider.upload(file_stream, path)
 
@@ -838,7 +838,7 @@ class TestCreateFolder:
 
         with mock_aws():
             boto3.DEFAULT_SESSION = None
-            s3client = boto3.client('s3')
+            s3client = boto3.client('s3', region_name='us-east-1')
             s3client.create_bucket(Bucket=provider.bucket.name)
             s3client.put_object(Bucket=provider.bucket.name, Key=path.full_path)
             await provider.create_folder(path)
@@ -876,7 +876,7 @@ class TestCreateFolder:
 
         with mock_aws():
             boto3.DEFAULT_SESSION = None
-            s3client = boto3.client('s3')
+            s3client = boto3.client('s3', region_name='us-east-1')
             s3client.create_bucket(Bucket=provider.bucket.name)
             s3client.put_object(Bucket=provider.bucket.name, Key=path.full_path)
             await provider.create_folder(path)
@@ -899,7 +899,7 @@ class TestCreateFolder:
 
         with mock_aws():
             boto3.DEFAULT_SESSION = None
-            s3client = boto3.client('s3')
+            s3client = boto3.client('s3', region_name='us-east-1')
             s3client.create_bucket(Bucket=provider.bucket.name)
             s3client.put_object(Bucket=provider.bucket.name, Key=path.full_path)
             await provider.create_folder(path)
@@ -925,7 +925,7 @@ class TestCreateFolder:
 
         with mock_aws():
             boto3.DEFAULT_SESSION = None
-            s3client = boto3.client('s3')
+            s3client = boto3.client('s3', region_name='us-east-1')
             s3client.create_bucket(Bucket=provider.bucket.name)
             resp = await provider.create_folder(path)
 

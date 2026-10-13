@@ -1,5 +1,4 @@
 import time
-import asyncio
 from unittest import mock
 
 import pytest
@@ -13,18 +12,6 @@ import tests.utils as test_utils
 
 # Task testing doesn't play nice with unittest-style tests, so fallback to regular pytest-style
 # setup/teardown.
-
-def pytest_runtest_setup(item):
-    policy = asyncio.get_event_loop_policy()
-    policy.get_event_loop().close()
-    event_loop = policy.new_event_loop()
-    policy.set_event_loop(event_loop)
-
-
-def pytest_runtest_teardown(item):
-    policy = asyncio.get_event_loop_policy()
-    policy.get_event_loop().close()
-
 
 # Fixtures for task tests
 

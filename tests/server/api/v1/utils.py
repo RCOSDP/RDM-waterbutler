@@ -1,6 +1,6 @@
 import os
 import asyncio
-from unittest.mock import Mock
+from unittest.mock import Mock, AsyncMock
 
 from tornado import testing
 
@@ -13,9 +13,14 @@ from tests.utils import MockProvider, MockFileMetadata, MockCoroutine
 
 class ServerTestCase(testing.AsyncHTTPTestCase):
 
+    prior_eventloop = None
+
     def setUp(self):
         policy = asyncio.get_event_loop_policy()
-        policy.get_event_loop().close()
+        try:
+            self.prior_eventloop = policy.get_event_loop()
+        except RuntimeError:
+            self.prior_eventloop = None
         self.event_loop = policy.new_event_loop()
         policy.set_event_loop(self.event_loop)
         super().setUp()
@@ -23,6 +28,13 @@ class ServerTestCase(testing.AsyncHTTPTestCase):
     def tearDown(self):
         super().tearDown()
         self.event_loop.close()
+        # Leave a usable loop behind: restore the previous one if it is still open,
+        # otherwise install a fresh one so later synchronous code does not get a closed loop.
+        policy = asyncio.get_event_loop_policy()
+        if self.prior_eventloop is not None and not self.prior_eventloop.is_closed():
+            policy.set_event_loop(self.prior_eventloop)
+        else:
+            policy.set_event_loop(policy.new_event_loop())
 
     def get_url(self, path):
         return super().get_url(os.path.join('/v1', path.lstrip('/')))
@@ -58,7 +70,10 @@ def mock_handler(http_request):
     handler.write = Mock()
     handler.write_stream = MockCoroutine()
     handler.redirect = Mock()
-    handler.uploader = asyncio.Future()
+    handler.rsock = Mock()
     handler.wsock = Mock()
+    handler.rfd = Mock()
+    handler.wfd = Mock()
     handler.writer = Mock()
+    handler.writer.wait_closed = AsyncMock()
     return handler
