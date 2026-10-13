@@ -2,6 +2,7 @@ import re
 import json
 import pytz
 import asyncio
+import inspect
 import logging
 import functools
 import unicodedata
@@ -50,7 +51,11 @@ def make_provider(name: str, auth: dict, credentials: dict, settings: dict, **kw
 
 def as_task(func):
     if not asyncio.iscoroutinefunction(func):
-        func = asyncio.coroutine(func)
+        sync_func = func
+
+        @functools.wraps(sync_func)
+        async def func(*args, **kwargs):
+            return sync_func(*args, **kwargs)
 
     @functools.wraps(func)
     def wrapped(*args, **kwargs):
@@ -67,7 +72,10 @@ def async_retry(retries=5, backoff=1, exceptions=(Exception, )):
         @functools.wraps(func)
         async def wrapped(*args, __retries=0, **kwargs):
             try:
-                return await asyncio.coroutine(func)(*args, **kwargs)
+                result = func(*args, **kwargs)
+                if inspect.isawaitable(result):
+                    result = await result
+                return result
             except exceptions as e:
                 if __retries < retries:
                     wait_time = backoff * __retries
@@ -80,8 +88,8 @@ def async_retry(retries=5, backoff=1, exceptions=(Exception, )):
                     # Logs before all things
                     logger.error('Task {0} failed with exception {1}'.format(func, e))
 
-                    with sentry_sdk.configure_scope() as scope:
-                        scope.set_tag('debug', False)
+                    scope = sentry_sdk.get_current_scope()
+                    scope.set_tag('debug', False)
                     sentry_sdk.capture_exception(e)
 
                     # If anything happens to be listening

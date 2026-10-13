@@ -245,7 +245,7 @@ class AzureBlobStorageProvider(provider.BaseProvider):
 
                     await self._put_block(sub_stream, path, block_id)
 
-            tasks = [sub_upload() for _ in range(UPLOAD_PARALLEL_NUM)]
+            tasks = [asyncio.ensure_future(sub_upload()) for _ in range(UPLOAD_PARALLEL_NUM)]
             await asyncio.wait(tasks)
 
             await self._put_block_list(path, block_id_list)
