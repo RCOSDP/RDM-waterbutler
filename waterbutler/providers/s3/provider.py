@@ -3,7 +3,7 @@ import hashlib
 import logging
 
 from http import HTTPStatus
-from urllib.parse import unquote
+from urllib.parse import unquote_plus
 import aiohttp
 import botocore.exceptions
 import xmltodict
@@ -486,12 +486,18 @@ class S3Provider(provider.BaseProvider):
         """GRDM: the rule for reading key names out of ``result``.
 
         botocore asks every listing for ``encoding-type=url``, so S3 answers with the values it
-        derived from key names -- the keys, the prefixes and the key markers -- percent-encoded,
-        and says so in ``EncodingType``.  Decoding has to follow what the response declares
-        rather than being assumed: a bucket that answers without ``EncodingType`` is reporting
-        the names verbatim, and decoding those would corrupt any key that legitimately contains
-        a ``%``.  Values S3 minted itself -- a version id, a continuation token -- are opaque
-        and are not encoded, so this decoder is not theirs to apply.
+        derived from key names -- the keys, the prefixes and the key markers -- encoded, and
+        says so in ``EncodingType``.  The encoding is the form-urlencoded one: **a space comes
+        back as ``+`` and a literal ``+`` as ``%2B``**, so the value has to be read with
+        ``unquote_plus``, which is what botocore's own ``handlers._decode_list_object`` uses.
+        ``unquote`` would leave the plus in place and every key holding a space would be
+        reported -- and then asked for -- under a name the bucket does not have.
+
+        Decoding has to follow what the response declares rather than being assumed: a bucket
+        that answers without ``EncodingType`` is reporting the names verbatim, and decoding
+        those would corrupt any key that legitimately contains a ``%`` or a ``+``.  Values S3
+        minted itself -- a version id, a continuation token -- are opaque and are not encoded,
+        so this decoder is not theirs to apply.
 
         A key marker matters twice over.  It is read out of one response and sent back as a
         query parameter on the next request, where the signer encodes it again -- so a marker
@@ -501,7 +507,7 @@ class S3Provider(provider.BaseProvider):
         :return: a callable that turns a value from ``result`` back into the name
         """
         if result.get('EncodingType') == 'url':
-            return unquote
+            return unquote_plus
         return lambda value: value
 
     async def get_folder_metadata(self, path, params, next_token=None):

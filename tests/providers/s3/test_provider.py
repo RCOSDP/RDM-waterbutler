@@ -237,8 +237,8 @@ def list_objects_v2_response(keys, is_truncated=False, next_continuation_token=N
 
     ``encoding_type`` defaults to ``'url'`` because that is what S3 answers: botocore puts
     ``encoding-type=url`` on every listing it signs, and S3 echoes the element back to say the
-    key names in the body are percent-encoded.  Pass ``None`` for the bucket that was listed
-    without it.
+    key names in the body are form-urlencoded -- a space as ``+``, a literal ``+`` as ``%2B``.
+    Pass ``None`` for the bucket that was listed without it.
     """
     body = '<?xml version="1.0" encoding="UTF-8"?>'
     body += '<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">'
@@ -2090,25 +2090,67 @@ class TestFolderListingPaging:
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
     async def test_encoded_names_are_decoded(self, auth, credentials, settings):
-        """CX1-3: keys and common prefixes are percent-encoded when the listing says so."""
+        """CX1-3: keys and common prefixes are encoded when the listing says so.
+
+        ``encoding-type=url`` is the form-urlencoded rule, so a space comes back as ``+`` and a
+        literal ``+`` as ``%2B``.  ``darp/x+y.txt`` is the case that tells the two decoders
+        apart; ``darp/x%20y.txt`` is listed beside it to say why it is not enough on its own --
+        ``unquote`` and ``unquote_plus`` read a ``%20`` the same way, so a fixture written with
+        only that form passes whichever decoder is in use and cannot catch a plus left in
+        place.  Both names decode to ``x y.txt``, which is why it appears twice.
+        """
         provider = raw_provider(auth, credentials, settings)
 
         with frozen_signing_clock():
-            await self._register_page(provider, ['darp/a%2Bb.txt', 'darp/x%20y.txt'],
-                                      common_prefixes=['darp%2Fsub%20dir%2F'], MaxKeys=1000)
+            await self._register_page(provider,
+                                      ['darp/a%2Bb.txt', 'darp/x+y.txt', 'darp/x%20y.txt'],
+                                      common_prefixes=['darp%2Fsub+dir%2F'], MaxKeys=1000)
             result = await provider.metadata(WaterButlerPath('/darp/'), next_token='')
 
-        assert sorted(item.name for item in result) == ['a+b.txt', 'sub dir', 'x y.txt']
+        assert sorted(item.name for item in result) == ['a+b.txt', 'sub dir',
+                                                        'x y.txt', 'x y.txt']
+
+    @pytest.mark.asyncio
+    @pytest.mark.aiohttpretty
+    async def test_a_space_in_a_key_survives_the_listing(self, auth, credentials, settings):
+        """A key holding a space is listed under the name it was stored with.
+
+        These three names are the ones a migration check put in a bucket with the previous
+        provider and then listed with this one.  Each exercises a different part of the rule:
+        a plain space, a space next to a literal ``+``, and a space next to a literal ``%``
+        (stored as the three characters ``%25``, so S3 sends ``%2525``).
+
+        Reading them with ``unquote`` instead leaves the pluses in place, and every one of
+        these keys is reported -- and then asked for -- under a name the bucket does not have.
+        """
+        provider = raw_provider(auth, credentials, settings)
+
+        with frozen_signing_clock():
+            await self._register_page(
+                provider,
+                ['darp/S-10+space.txt',
+                 'darp/S-10-%E6%97%A5%E6%9C%AC%E8%AA%9E+%E5%90%8D%E5%89%8D%2B%E8%A8%98%E5%8F%B7'
+                 '(1).txt',
+                 'darp/S-10-raw/a%2Bb+%2525+c~d.txt'],
+                MaxKeys=1000)
+            result = await provider.metadata(WaterButlerPath('/darp/'), next_token='')
+
+        assert sorted(item.path for item in result) == [
+            '/darp/S-10 space.txt',
+            '/darp/S-10-raw/a+b %25 c~d.txt',
+            '/darp/S-10-日本語 名前+記号(1).txt',
+        ]
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
     async def test_a_listing_that_is_not_encoded_is_read_verbatim(self, auth, credentials,
                                                                   settings):
-        """CX1-3: ``key.replace('+', ' ')`` is the form-encoding rule, and S3 does not use it.
+        """CX1-3: the form-encoding rule applies to a listing that says it is encoded.
 
-        Under ``encoding-type=url`` a literal ``+`` arrives as ``%2B`` and a space as ``%20``,
-        so that replace can only ever fire on a name that was *not* encoded -- where it
-        renames the object.  A user who uploads ``a+b.txt`` then cannot download it.
+        Under ``encoding-type=url`` a literal ``+`` arrives as ``%2B`` and a space as ``+``, so
+        reading a plus as a space is right *there* and wrong here: a bucket that answers
+        without ``EncodingType`` reports the names as stored, and turning that plus into a
+        space renames the object.  A user who uploads ``a+b.txt`` then cannot download it.
         """
         provider = raw_provider(auth, credentials, settings)
 
@@ -3016,9 +3058,9 @@ class TestObjectVersionsPaging:
     async def test_encoded_keys_and_markers_are_decoded(self, auth, credentials, settings):
         """V-1 / V-2 / V-6 / CX1-3: read the key names by the rule the response declares.
 
-        botocore puts ``encoding-type=url`` on every listing it signs, so S3 percent-encodes
-        the key names and the markers that resume from them, and says so with
-        ``<EncodingType>url</EncodingType>``.
+        botocore puts ``encoding-type=url`` on every listing it signs, so S3 form-urlencodes
+        the key names and the markers that resume from them -- a space as ``+``, a literal
+        ``+`` as ``%2B`` -- and says so with ``<EncodingType>url</EncodingType>``.
 
         The marker is the sharp edge.  It goes back as a ``KeyMarker`` *parameter*, which the
         signer percent-encodes on the way out; handing it the already-encoded form asks S3 for
@@ -3041,7 +3083,7 @@ class TestObjectVersionsPaging:
                 Prefix='f/')
             await self._register_versions(
                 provider,
-                list_versions_response(versions=[('f%2Fx%20y.txt', 'version-two')]),
+                list_versions_response(versions=[('f%2Fx+y.txt', 'version-two')]),
                 Prefix='f/', KeyMarker='f/a+b', VersionIdMarker='version-one')
 
             versions = await provider.get_object_versions({'Prefix': 'f/'})
