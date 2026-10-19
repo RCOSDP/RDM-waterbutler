@@ -72,7 +72,7 @@ def mock_time(monkeypatch):
 def pinned_signing_clock():
     """Pin the clock botocore signs with, for every test in this module.
 
-    T-1 / CX1-11: a test that answers the *real* presigner has to name the URL the presigner
+    A test that answers the *real* presigner has to name the URL the presigner
     produces, and the only thing that moves between two otherwise identical signings is
     ``X-Amz-Date`` and the signature derived from it.  Freezing it here rather than at each call
     site means a test can go back to the real presigner by deleting the stub, without also
@@ -87,12 +87,12 @@ def pinned_signing_clock():
 def provider(auth, credentials, settings):
     """The shared provider, with only the region lookup stubbed.
 
-    T-1 / CX1-11: this fixture used to install a hand-written ``generate_generic_presigned_url``
+    This fixture used to install a hand-written ``generate_generic_presigned_url``
     and ``check_key_existence`` -- the first returned ``https://<bucket>.s3.amazonaws.com/<key>``
     from the path alone, ignoring the operation and the parameters entirely; the second re-made
     the same string.  Every test reached through it therefore asserted against a URL the test
     suite had invented, and the real presigner never ran.  Three ROUND1 majors lived in exactly
-    that gap (CX1-1/2/3).  The stubs are gone; ``region`` is pinned so the endpoint the presigner
+    that gap.  The stubs are gone; ``region`` is pinned so the endpoint the presigner
     signs against is stable, and :func:`pinned_signing_clock` pins the clock, which is what lets
     a test name the signed URL in advance.
 
@@ -218,8 +218,8 @@ def list_upload_chunks_body(parts_metadata):
 def folder_listing_params(path, max_keys=None, continuation_token=None):
     """The ListObjectsV2 parameters ``_metadata_folder`` signs for ``path``.
 
-    T-1 / CX1-11: these are the parameters the provider passes, in the casing botocore wants --
-    ``MaxKeys`` an int, because botocore validates parameter types before it signs (CX1-1).
+    These are the parameters the provider passes, in the casing botocore wants --
+    ``MaxKeys`` an int, because botocore validates parameter types before it signs.
     They go to the signing call, not to an assertion about the query string: the query string
     is now whatever botocore signed, and the test matches it by naming the whole URL.
     """
@@ -325,11 +325,11 @@ class _OverriddenClientCtx:
 def patch_aiobotocore_client(**methods):
     """Let the provider build a *real* aiobotocore client, then raise from ``methods`` on it.
 
-    T-1 / CX1-11: client creation is not stubbed and ``generate_presigned_url`` is left alone,
+    Client creation is not stubbed and ``generate_presigned_url`` is left alone,
     so a provider method that signs a URL on its way to the call under test still signs it with
     the real presigner.
 
-    T-1 / CX2-3: **failure injection only.**  A method bound here shadows ``_make_api_call``,
+    **failure injection only.**  A method bound here shadows ``_make_api_call``,
     so nothing below it -- serialisation, signing, the ``needs-retry`` chain, the rest-xml
     parser -- runs at all.  That is the point when the failure being measured is one the SDK
     itself raises (a ``ClientError`` the provider has to convert, a cancellation), and it is a
@@ -376,7 +376,7 @@ class _FrozenSigningClock(datetime.datetime):
 def frozen_signing_clock():
     """Pin the clock botocore signs with, so a presigned URL is reproducible.
 
-    T-1 / CX1-11: the real presigner has to run -- it is what rejects a wrongly typed
+    The real presigner has to run -- it is what rejects a wrongly typed
     parameter, adds ``encoding-type=url`` and turns the parameters into the query string that
     actually goes on the wire.  Three ROUND1 majors hid behind a hand-written stand-in for it.
     Answering the real URL with ``aiohttpretty`` means the test has to name that URL, and the
@@ -408,7 +408,7 @@ async def register_presigned(provider, http_method, s3_method, path='', query_pa
 def redirect_presigned_origin(provider, origin):
     """Send the provider's presigned requests to ``origin`` instead of to S3.
 
-    T-1 / CX1-11: this is not a stand-in for the presigner.  The real
+    This is not a stand-in for the presigner.  The real
     ``generate_generic_presigned_url`` runs and its output is kept whole -- path, query,
     signature -- with only the scheme and host rewritten.  The endpoint the provider signs
     against is hard-coded to ``s3[.<region>].amazonaws.com``, and a test cannot listen there;
@@ -430,7 +430,7 @@ def redirect_presigned_origin(provider, origin):
 def record_request_urls(provider):
     """Record the URL of every request ``provider`` makes, without changing any of them.
 
-    T-1 / CX1-11: this is a spy, not a stand-in.  The real ``make_request`` runs, so the request
+    This is a spy, not a stand-in.  The real ``make_request`` runs, so the request
     still goes out over the session that ``aiohttpretty`` is standing in for; the wrapper only
     keeps a copy of the URL the real presigner produced, which is the only way to read the query
     that actually went on the wire byte for byte (``aiohttpretty`` hands back a ``furl`` whose
@@ -655,7 +655,7 @@ class TestValidatePath:
 
     @pytest.mark.asyncio
     async def test_root(self, auth, credentials, settings, mock_time):
-        """T-2: a connection made at the bucket root resolves ``/`` to the root path.
+        """A connection made at the bucket root resolves ``/`` to the root path.
 
         The shared ``provider`` fixture is scoped to ``/my-subfolder/`` (see ``test_subfolder``)
         because GRDM lets a node connect to a folder inside the bucket, so this case needs a
@@ -991,7 +991,7 @@ class TestCRUD:
     @pytest.mark.aiohttpretty
     async def test_chunked_upload_upload_part(self, auth, credentials, settings, file_stream,
                                               upload_parts_headers_list):
-        """T-1 / CX1-2: the part goes to the URL the real presigner signed, and to nothing
+        """The part goes to the URL the real presigner signed, and to nothing
         else.  ``PartNumber`` and ``UploadId`` are already in that URL, so the request must
         not name them again."""
         provider = raw_provider(auth, credentials, settings)
@@ -1206,7 +1206,7 @@ class TestCRUD:
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
     async def test_a_successful_delete_is_a_real_sdk_call(self, provider, monkeypatch, mock_time):
-        """CX2-3 / T-1: a delete that succeeds still runs the SDK end to end.
+        """A delete that succeeds still runs the SDK end to end.
 
         The delete tests here used to bind a coroutine over ``delete_objects`` on a real client,
         which reads like a real call and is not one: ``_make_api_call`` never runs, so nothing is
@@ -1269,7 +1269,7 @@ class TestCRUD:
     @pytest.mark.aiohttpretty
     async def test_delete_file_on_bucket_without_versioning(self, provider, monkeypatch,
                                                             mock_time):
-        """V-3: a bucket with versioning disabled reports the single live object with the
+        """A bucket with versioning disabled reports the single live object with the
         literal version id 'null', which DeleteObjects accepts verbatim."""
         path = WaterButlerPath('/some-file')
 
@@ -1311,7 +1311,7 @@ class TestCRUD:
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
     async def test_delete_file_partial_failure_raises(self, provider, monkeypatch, mock_time):
-        """V-4: DeleteObjects reports per-object failures in the 200 body.  Fail closed, and
+        """DeleteObjects reports per-object failures in the 200 body.  Fail closed, and
         name the objects that survived so the caller can retry them."""
         path = WaterButlerPath('/some-file')
 
@@ -1341,7 +1341,7 @@ class TestCRUD:
     @pytest.mark.aiohttpretty
     @pytest.mark.parametrize('status', [403, 500])
     async def test_delete_file_versions_listing_http_error(self, provider, status, mock_time):
-        """V-5: a failed version listing must surface as a DeleteError, not as whatever the
+        """A failed version listing must surface as a DeleteError, not as whatever the
         listing helper happens to throw, and must not leak the raw S3 error document."""
         path = WaterButlerPath('/some-file')
 
@@ -1365,7 +1365,7 @@ class TestCRUD:
     @pytest.mark.parametrize('transport_error', [aiohttp.ClientError, asyncio.TimeoutError])
     async def test_delete_file_versions_listing_transport_error(self, provider, transport_error,
                                                                 mock_time):
-        """V-5: transport failures are not WaterButlerErrors and would otherwise escape
+        """Transport failures are not WaterButlerErrors and would otherwise escape
         delete() unconverted."""
         path = WaterButlerPath('/some-file')
 
@@ -1416,7 +1416,7 @@ class TestCRUD:
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
     async def test_delete_folder_with_versions(self, provider, monkeypatch, mock_time):
-        """V-6: deleting a folder purges every version and every delete marker under the
+        """Deleting a folder purges every version and every delete marker under the
         prefix.  Deleting only the live keys leaves the folder's whole history -- and the
         storage it occupies -- behind on a versioned bucket.
         """
@@ -1470,7 +1470,7 @@ class TestCRUD:
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
     async def test_empty_folder_delete(self, provider, monkeypatch, mock_time):
-        """V-6: an empty folder still exists as the 0-byte ``prefix/`` key, which is one
+        """An empty folder still exists as the 0-byte ``prefix/`` key, which is one
         version of its own.  Deleting it must remove that key, not report the folder missing.
         """
         path = WaterButlerPath('/empty-folder/')
@@ -1494,7 +1494,7 @@ class TestCRUD:
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
     async def test_delete_folder_not_found(self, provider, monkeypatch, mock_time):
-        """V-6: a prefix with neither a version nor a delete marker under it is a folder that
+        """A prefix with neither a version nor a delete marker under it is a folder that
         does not exist, and must not be reported as a successful delete."""
         path = WaterButlerPath('/not-found-folder/')
 
@@ -1514,7 +1514,7 @@ class TestCRUD:
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
     async def test_delete_folder_of_delete_markers_only(self, provider, monkeypatch, mock_time):
-        """V-6: a folder whose keys have all been delete-marked still has versions to purge."""
+        """A folder whose keys have all been delete-marked still has versions to purge."""
         path = WaterButlerPath('/tombstone-folder/')
 
         await register_presigned(
@@ -1559,7 +1559,7 @@ class TestCRUD:
     @pytest.mark.asyncio
     async def test_a_refusal_in_a_later_batch_is_reported(self, auth, credentials, settings,
                                                           monkeypatch, mock_time):
-        """CX2-2 / V-4: every batch's body is read, not just the first one's.
+        """Every batch's body is read, not just the first one's.
 
         DeleteObjects answers 200 and lists the refusals inside the body, so the check belongs
         to each call rather than to the loop's outcome.  The partial-failure tests above use a
@@ -1597,7 +1597,7 @@ class TestCRUD:
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
     async def test_delete_folder_truncated_response(self, provider, monkeypatch, mock_time):
-        """V-6: a folder holding more than one page of versions must be listed to the end
+        """A folder holding more than one page of versions must be listed to the end
         before any of it is deleted, otherwise the tail of the folder silently survives.
         ListObjectVersions resumes from the last key *and* version id, not a continuation
         token."""
@@ -1635,7 +1635,7 @@ class TestCRUD:
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
     async def test_folder_delete_partial_failure_raises(self, provider, monkeypatch, mock_time):
-        """V-4, folder side: refusals reported inside the 200 body must not read as success."""
+        """Folder side: refusals reported inside the 200 body must not read as success."""
         path = WaterButlerPath('/error-folder/')
 
         await register_presigned(
@@ -1658,7 +1658,7 @@ class TestCRUD:
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
     async def test_delete_folder_delete_error(self, provider, mock_time):
-        """V-6: a refused DeleteObjects call surfaces as a DeleteError."""
+        """A refused DeleteObjects call surfaces as a DeleteError."""
         path = WaterButlerPath('/error-folder/')
 
         await register_presigned(
@@ -1673,10 +1673,10 @@ class TestCRUD:
             with pytest.raises(exceptions.DeleteError):
                 await provider.delete(path)
 
-    # CX1-13: a folder delete whose listing fails is asserted by
+    # A folder delete whose listing fails is asserted by
     # `TestErrorReporting.test_delete_folder_reports_a_failed_listing_as_a_delete_failure`,
     # which expects the `DeleteError` this now raises rather than the `DownloadError` that used
-    # to reach the caller, and runs through the real presigner (T-1 / CX1-11).
+    # to reach the caller, and runs through the real presigner.
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
@@ -1687,7 +1687,7 @@ class TestCRUD:
     ])
     async def test_download_accept_url_answers_with_the_signed_url(
             self, auth, credentials, settings, mock_time, revision, display_name, expected_name):
-        """G-10 / 決定-19: ``accept_url=True`` hands back the presigned URL to redirect to.
+        """``accept_url=True`` hands back the presigned URL to redirect to.
 
         This is the default on every download the API serves --
         ``waterbutler.server.api.v1.provider.metadata`` passes ``'direct' not in query`` -- and
@@ -1701,7 +1701,7 @@ class TestCRUD:
         parameters the streaming path would have used: the version being asked for and the
         ``Content-Disposition`` that gives the download its filename.
 
-        T-1 / CX1-11: the real presigner produces both sides of the comparison.
+        The real presigner produces both sides of the comparison.
         """
         provider = raw_provider(auth, credentials, settings)
         path = WaterButlerPath('/my-subfolder/my-image')
@@ -1730,7 +1730,7 @@ class TestCRUD:
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
     async def test_download_without_accept_url_still_streams(self, provider, mock_time):
-        """G-10: ``?direct`` -- the one case where the server asks for the bytes -- is unchanged."""
+        """``?direct`` -- the one case where the server asks for the bytes -- is unchanged."""
         path = WaterButlerPath('/my-image')
         await register_presigned(
             provider, 'GET', 'get_object', path=path.path, default_params=True,
@@ -1748,7 +1748,7 @@ class TestMetadata:
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
     async def test_handle_data(self, provider):
-        """P-3: the trailing continuation token is split off the listing."""
+        """The trailing continuation token is split off the listing."""
         data = ['txt001.txt', 'abc']
         result, token = provider.handle_data(data)
         assert token == 'abc'
@@ -1776,7 +1776,7 @@ class TestMetadata:
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
     async def test_metadata_have_next_token(self, provider, folder_metadata, mock_time):
-        """P-1: ``metadata()`` accepts ``next_token`` instead of dropping it into ``**kwargs``."""
+        """``metadata()`` accepts ``next_token`` instead of dropping it into ``**kwargs``."""
         path = WaterButlerPath('/darp/')
         await register_presigned(
             provider, 'GET', 'list_objects_v2',
@@ -1795,7 +1795,7 @@ class TestMetadata:
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
     async def test_metadata_folder_have_next_token(self, provider, folder_metadata, mock_time):
-        """P-1: ``_metadata_folder()`` takes the token positionally as well."""
+        """``_metadata_folder()`` takes the token positionally as well."""
         path = WaterButlerPath('/darp/')
         await register_presigned(
             provider, 'GET', 'list_objects_v2',
@@ -1903,7 +1903,7 @@ class TestMetadata:
     async def test_metadata_file_missing(self, provider, mock_time):
         """A HEAD that answers 404 reaches the caller as ``NotFoundError``.
 
-        T-1 / CX1-11: this used to assert ``MetadataError``, which is what the *stub*
+        This used to assert ``MetadataError``, which is what the *stub*
         ``check_key_existence`` raised -- it called ``make_request(..., throws=MetadataError)``
         and stopped there.  The real one wraps that call in the ``except`` that re-raises
         through ``_raise_from_client_error`` as ``NotFoundError``, because ``BaseProvider.exists``
@@ -1973,7 +1973,7 @@ class TestMetadata:
 
 
 class TestFolderListingPaging:
-    """P-1〜P-5: one page at a time for the UI, the whole listing for everyone else.
+    """One page at a time for the UI, the whole listing for everyone else.
 
     The GRDM file browser walks a folder page by page, so ``metadata()`` has to be able to
     stop after one page and hand back a token for the next one.  Every other caller of
@@ -1982,10 +1982,10 @@ class TestFolderListingPaging:
     among the metadata objects, so the two behaviours are told apart by whether the caller
     passed a ``next_token`` keyword at all.
 
-    T-1 / CX1-11: every request here is signed by the real presigner.  The earlier version of
+    Every request here is signed by the real presigner.  The earlier version of
     this class handed the provider a stand-in that accepted any parameter and pasted it into a
     query string, which is why ``MaxKeys='1000'`` -- a value botocore refuses outright -- read
-    as covered (CX1-1).  Nothing below substitutes the presigner: the injection is at the HTTP
+    as covered.  Nothing below substitutes the presigner: the injection is at the HTTP
     boundary, and the URL registered there is the one the presigner produced.
     """
 
@@ -2023,7 +2023,7 @@ class TestFolderListingPaging:
     ])
     async def test_a_page_request_reaches_s3(self, auth, credentials, settings,
                                              next_token, sent_token):
-        """P-1 / P-2 / P-5 / CX1-1: the paging parameters are ones botocore will sign.
+        """The paging parameters are ones botocore will sign.
 
         On ``ca65500e`` ``MaxKeys`` is the string ``'1000'``; botocore raises
         ``ParamValidationError`` before anything is signed and the provider converts that into
@@ -2051,7 +2051,7 @@ class TestFolderListingPaging:
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
     async def test_last_page_has_no_trailing_token(self, auth, credentials, settings):
-        """P-4: ``IsTruncated`` false means the caller must not see a str at the end."""
+        """``IsTruncated`` false means the caller must not see a str at the end."""
         provider = raw_provider(auth, credentials, settings)
 
         with frozen_signing_clock():
@@ -2073,7 +2073,7 @@ class TestFolderListingPaging:
         them raises ``AttributeError`` mid-copy or mid-download.
 
         No ``MaxKeys`` goes on these requests, which is what makes this the control case for
-        CX1-1: the drain path signs cleanly on ``ca65500e`` too.
+        The drain path signs cleanly on ``ca65500e`` too.
         """
         provider = raw_provider(auth, credentials, settings)
 
@@ -2090,62 +2090,42 @@ class TestFolderListingPaging:
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
     async def test_encoded_names_are_decoded(self, auth, credentials, settings):
-        """CX1-3: keys and common prefixes are encoded when the listing says so.
-
-        ``encoding-type=url`` is the form-urlencoded rule, so a space comes back as ``+`` and a
-        literal ``+`` as ``%2B``.  ``darp/x+y.txt`` is the case that tells the two decoders
-        apart; ``darp/x%20y.txt`` is listed beside it to say why it is not enough on its own --
-        ``unquote`` and ``unquote_plus`` read a ``%20`` the same way, so a fixture written with
-        only that form passes whichever decoder is in use and cannot catch a plus left in
-        place.  Both names decode to ``x y.txt``, which is why it appears twice.
-        """
+        """Keys and common prefixes are form-urldecoded when the listing says so."""
         provider = raw_provider(auth, credentials, settings)
 
         with frozen_signing_clock():
-            await self._register_page(provider,
-                                      ['darp/a%2Bb.txt', 'darp/x+y.txt', 'darp/x%20y.txt'],
+            await self._register_page(provider, ['darp/a%2Bb.txt', 'darp/x+y.txt'],
                                       common_prefixes=['darp%2Fsub+dir%2F'], MaxKeys=1000)
             result = await provider.metadata(WaterButlerPath('/darp/'), next_token='')
 
-        assert sorted(item.name for item in result) == ['a+b.txt', 'sub dir',
-                                                        'x y.txt', 'x y.txt']
+        assert sorted(item.name for item in result) == ['a+b.txt', 'sub dir', 'x y.txt']
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
     async def test_a_space_in_a_key_survives_the_listing(self, auth, credentials, settings):
-        """A key holding a space is listed under the name it was stored with.
-
-        These three names are the ones a migration check put in a bucket with the previous
-        provider and then listed with this one.  Each exercises a different part of the rule:
-        a plain space, a space next to a literal ``+``, and a space next to a literal ``%``
-        (stored as the three characters ``%25``, so S3 sends ``%2525``).
-
-        Reading them with ``unquote`` instead leaves the pluses in place, and every one of
-        these keys is reported -- and then asked for -- under a name the bucket does not have.
-        """
+        """A space is read back as a space beside a literal ``+``, a literal ``%`` and non-ASCII."""
         provider = raw_provider(auth, credentials, settings)
 
         with frozen_signing_clock():
             await self._register_page(
                 provider,
-                ['darp/S-10+space.txt',
-                 'darp/S-10-%E6%97%A5%E6%9C%AC%E8%AA%9E+%E5%90%8D%E5%89%8D%2B%E8%A8%98%E5%8F%B7'
-                 '(1).txt',
-                 'darp/S-10-raw/a%2Bb+%2525+c~d.txt'],
+                ['darp/a+b.txt',
+                 'darp/%E6%97%A5%E6%9C%AC%E8%AA%9E+%E5%90%8D%E5%89%8D%2B%E8%A8%98%E5%8F%B7.txt',
+                 'darp/a%2Bb+%2525+c.txt'],
                 MaxKeys=1000)
             result = await provider.metadata(WaterButlerPath('/darp/'), next_token='')
 
         assert sorted(item.path for item in result) == [
-            '/darp/S-10 space.txt',
-            '/darp/S-10-raw/a+b %25 c~d.txt',
-            '/darp/S-10-日本語 名前+記号(1).txt',
+            '/darp/a b.txt',
+            '/darp/a+b %25 c.txt',
+            '/darp/日本語 名前+記号.txt',
         ]
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
     async def test_a_listing_that_is_not_encoded_is_read_verbatim(self, auth, credentials,
                                                                   settings):
-        """CX1-3: the form-encoding rule applies to a listing that says it is encoded.
+        """The form-encoding rule applies to a listing that says it is encoded.
 
         Under ``encoding-type=url`` a literal ``+`` arrives as ``%2B`` and a space as ``+``, so
         reading a plus as a space is right *there* and wrong here: a bucket that answers
@@ -2165,7 +2145,7 @@ class TestFolderListingPaging:
     @pytest.mark.aiohttpretty
     async def test_handle_data_leaves_a_single_file_alone(self, auth, credentials, settings,
                                                           file_header_metadata):
-        """P-3: a file's metadata is not a listing, so nothing may be popped off it."""
+        """A file's metadata is not a listing, so nothing may be popped off it."""
         provider = raw_provider(auth, credentials, settings)
         path = WaterButlerPath('/Foo/Bar/my-image.jpg')
 
@@ -2215,7 +2195,7 @@ class TestCreateFolder:
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
     async def test_create_folder_with_folder_precheck_is_false(self, provider, mock_time):
-        """T-2: skipping the "does it already exist" check does not skip the check that the
+        """Skipping the "does it already exist" check does not skip the check that the
         path names a folder at all, so no request is made for a path that cannot be created."""
         path = WaterButlerPath('/alreadyexists')
 
@@ -2289,7 +2269,7 @@ class TestOperations:
         ListObjectVersions is signed over its parameters -- a missing bucket is not a default
         botocore supplies later, the call fails to sign.
 
-        T-1 / CX1-11: asserted against the URL the real presigner produced and the request that
+        Asserted against the URL the real presigner produced and the request that
         was actually made with it, rather than against the arguments it was called with.  In a
         signed URL the bucket is the path and the prefix is a query parameter, so a test that
         only inspects the call arguments cannot tell a bucket that was signed in from one that
@@ -2322,13 +2302,13 @@ class TestOperations:
         dest_provider.exists = MockCoroutine(return_value=True)
         dest_provider.metadata = MockCoroutine(return_value=file_metadata_object)
         dest_provider.bucket_name = provider.bucket_name
-        # 決定-20: the client is built from the destination's credentials and region.
+        # The client is built from the destination's credentials and region.
         dest_provider.aws_access_key_id = provider.aws_access_key_id
         dest_provider.aws_secret_access_key = provider.aws_secret_access_key
         dest_provider.region = provider.region
         dest_provider._check_region = MockCoroutine()
 
-        # T-1 / CX2-3: this used to hand `get_session` a bare `mock.Mock()`, so no aiobotocore
+        # This used to hand `get_session` a bare `mock.Mock()`, so no aiobotocore
         # client was ever built and the CopySource the provider assembles was checked against a
         # client that would have accepted anything.  Injecting at `before-send` instead leaves
         # the real client to serialise and sign the request, so what is asserted below is the
@@ -2485,7 +2465,7 @@ def patch_session_with_before_send(monkeypatch, http_response_factory, operation
     signed, the response is still parsed by botocore's rest-xml parser, and the whole
     ``needs-retry`` handler chain -- including S3's 200-with-error special case -- still runs.
     Injecting at the aiobotocore client boundary instead would skip all of that, which is exactly
-    the behaviour K-3 needs to measure.
+    the behaviour being measured.
 
     :return: the list of sent requests, in order
     """
@@ -2579,7 +2559,7 @@ def patch_delete_objects(monkeypatch, *responses):
 def sent_delete_objects(request):
     """Read a DeleteObjects call back off the wire.
 
-    T-1 / CX2-3: these calls used to be asserted on a coroutine bound over the client, which
+    These calls used to be asserted on a coroutine bound over the client, which
     told the test what the *provider* passed and nothing about what botocore made of it.  The
     request examined here has been serialised into rest-xml and signed, so an argument the SDK
     would have dropped or renamed shows up as a difference rather than as a pass.
@@ -2611,14 +2591,14 @@ def sent_copy_object(request):
 
 
 class TestIntraCopy:
-    """I-2〜I-5: the ``intra_copy`` contract and how it reports provider failures."""
+    """The ``intra_copy`` contract and how it reports provider failures."""
 
     def _dest_provider(self, provider, file_metadata_object, exists):
         dest_provider = mock.Mock()
         dest_provider.exists = MockCoroutine(return_value=exists)
         dest_provider.metadata = MockCoroutine(return_value=file_metadata_object)
         dest_provider.bucket_name = provider.bucket_name
-        # 決定-20: the copy is signed by the destination, so these are read for real now.  The
+        # The copy is signed by the destination, so these are read for real now.  The
         # same values as the source keep these tests measuring error reporting rather than
         # credentials -- which is asserted separately, against two distinct real providers, by
         # `test_intra_copy_is_signed_with_the_destination_credentials`.
@@ -2632,7 +2612,7 @@ class TestIntraCopy:
     async def test_intra_copy_reports_created_when_dest_is_absent(self, provider,
                                                                   file_metadata_object,
                                                                   monkeypatch, mock_time):
-        """I-5: ``(metadata, created)`` -- ``created`` is True only when nothing was overwritten."""
+        """``(metadata, created)`` -- ``created`` is True only when nothing was overwritten."""
         dest_provider = self._dest_provider(provider, file_metadata_object, exists=False)
         patch_session_with_before_send(
             monkeypatch, lambda: _FakeHTTPResponse(200, COPY_OBJECT_SUCCESS_BODY))
@@ -2648,7 +2628,7 @@ class TestIntraCopy:
     async def test_intra_copy_reports_not_created_when_dest_exists(self, provider,
                                                                    file_metadata_object,
                                                                    monkeypatch, mock_time):
-        """I-5: an overwrite reports ``created`` False."""
+        """An overwrite reports ``created`` False."""
         dest_provider = self._dest_provider(provider, file_metadata_object, exists=True)
         patch_session_with_before_send(
             monkeypatch, lambda: _FakeHTTPResponse(200, COPY_OBJECT_SUCCESS_BODY))
@@ -2662,7 +2642,7 @@ class TestIntraCopy:
     @pytest.mark.asyncio
     async def test_intra_copy_converts_client_error(self, provider, file_metadata_object,
                                                     mock_time):
-        """K-8: a botocore ``ClientError`` must become an ``IntraCopyError`` that carries the
+        """A botocore ``ClientError`` must become an ``IntraCopyError`` that carries the
         provider's HTTP status, not a blanket 500.
         """
         dest_provider = self._dest_provider(provider, file_metadata_object, exists=False)
@@ -2688,7 +2668,7 @@ class TestIntraCopy:
     ])
     async def test_intra_copy_converts_every_failure_botocore_can_raise(
             self, provider, file_metadata_object, mock_time, error):
-        """CX1-8 / K-7 / K-8: ``ClientError`` is the one failure that means "S3 answered".  The
+        """``ClientError`` is the one failure that means "S3 answered".  The
         endpoint being unreachable, the read timing out, a parameter failing validation before
         anything is sent and the body ending early are the ordinary rest, and each one used to
         travel out of ``intra_copy`` unconverted -- reaching the API layer as a bare 500 whose
@@ -2713,7 +2693,7 @@ class TestIntraCopy:
     async def test_intra_copy_error_message_omits_provider_detail(self, provider,
                                                                   file_metadata_object,
                                                                   mock_time):
-        """K-9: the error surfaced to the user names the failure; it does not quote the provider's
+        """The error surfaced to the user names the failure; it does not quote the provider's
         own message, which is where request ids, bucket names and signed urls leak from.
         """
         dest_provider = self._dest_provider(provider, file_metadata_object, exists=False)
@@ -2738,7 +2718,7 @@ class TestIntraCopy:
     @pytest.mark.asyncio
     async def test_intra_copy_succeeds_through_botocore(self, provider, file_metadata_object,
                                                         monkeypatch, mock_time):
-        """K-3 control: the same real-botocore harness lets an ordinary 200 through, so a failure
+        """Control: the same real-botocore harness lets an ordinary 200 through, so a failure
         in the sibling tests is attributable to the response body and not to the harness.
         """
         provider.region = 'us-east-1'
@@ -2758,7 +2738,7 @@ class TestIntraCopy:
     @pytest.mark.asyncio
     async def test_intra_copy_is_signed_with_the_destination_credentials(
             self, auth, credentials, settings, file_metadata_object, monkeypatch, mock_time):
-        """決定-20 / CX1-7: CopyObject is signed by ``dest_provider``, as the docstring says.
+        """CopyObject is signed by ``dest_provider``, as the docstring says.
 
         ``intra_copy``'s own contract -- "the credentials specified in `dest_provider` must have
         read access to `source.bucket`" -- is the one develop implements: it signs the PUT with
@@ -2811,7 +2791,7 @@ class TestIntraCopy:
     async def test_intra_copy_200_with_error_body_fails_closed(self, provider,
                                                                file_metadata_object,
                                                                monkeypatch, mock_time, body):
-        """K-3: S3 can answer CopyObject with 200 and an ``<Error>`` body.  Measure whether
+        """S3 can answer CopyObject with 200 and an ``<Error>`` body.  Measure whether
         botocore's ``check_for_200_error`` catches it under aiobotocore, and make sure whatever
         it produces reaches the caller as a failure -- never as a successful copy, and never with
         a 2xx status code attached to the WaterButler error.
@@ -2833,7 +2813,7 @@ class TestIntraCopy:
 
 
 class TestIntraCopySizeLimit:
-    """I-3: core must not route an oversized file through ``intra_copy``."""
+    """Core must not route an oversized file through ``intra_copy``."""
 
     def _spy_on_intra(self, provider):
         """Record calls without replacing the implementation, so an unexpected call still runs
@@ -2856,7 +2836,7 @@ class TestIntraCopySizeLimit:
     async def _register_copy_traffic(self, provider, file_content, file_header_metadata):
         """Answer the three requests a stream copy makes, each on its own signed URL.
 
-        T-1 / CX1-11: the download, the destination's existence check and the upload are three
+        The download, the destination's existence check and the upload are three
         different operations on two different keys, so the real presigner gives three distinct
         URLs.  The old stub collapsed them to two strings derived from the path alone, which is
         why ``match_querystring=False`` used to be needed here.
@@ -2907,7 +2887,7 @@ class TestIntraCopySizeLimit:
         src_url, dest_url = await self._register_copy_traffic(provider, file_content,
                                                               file_header_metadata)
         # The source is deleted after the copy; it has a single version and no delete markers.
-        # T-1 / CX1-11: ListObjectVersions carries the prefix in the signed query string, so
+        # ListObjectVersions carries the prefix in the signed query string, so
         # this is its own URL rather than the bare bucket one the stub used to produce.
         await register_presigned(
             provider, 'GET', 'list_object_versions',
@@ -2953,7 +2933,7 @@ class TestIntraCopySizeLimit:
 
 
 class TestFileSizeSource:
-    """I-4: ``file_size`` comes from ``S3FileMetadataHeaders.size``, which has to survive both
+    """``file_size`` comes from ``S3FileMetadataHeaders.size``, which has to survive both
     spellings of the length header.  ``osfstorage`` feeds the result straight into ``int()``
     (providers/osfstorage/provider.py), so a ``None`` here is a TypeError there.
     """
@@ -3001,15 +2981,15 @@ class TestFileSizeSource:
 
 
 class TestObjectVersionsPaging:
-    """U-1: ``get_object_versions`` drives the ListObjectVersions API, but pages it with the
+    """``get_object_versions`` drives the ListObjectVersions API, but pages it with the
     ListObjectsV2 continuation contract (``NextContinuationToken``/``ContinuationToken``).
     ListObjectVersions never returns a ``NextContinuationToken``; it continues with
     ``NextKeyMarker``/``NextVersionIdMarker``.  It also reports deleted objects in separate
     ``DeleteMarker`` elements, which the current collector ignores entirely.
 
-    T-1 / CX1-11: every request here is signed by the real presigner, which is also what puts
+    Every request here is signed by the real presigner, which is also what puts
     ``encoding-type=url`` on the listing.  The stand-in this class used to install did not,
-    so the encoding half of the contract was invisible to it (CX1-3).
+    so the encoding half of the contract was invisible to it.
     """
 
     async def _register_versions(self, provider, body, **params):
@@ -3056,7 +3036,7 @@ class TestObjectVersionsPaging:
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
     async def test_encoded_keys_and_markers_are_decoded(self, auth, credentials, settings):
-        """V-1 / V-2 / V-6 / CX1-3: read the key names by the rule the response declares.
+        """Read the key names by the rule the response declares.
 
         botocore puts ``encoding-type=url`` on every listing it signs, so S3 form-urlencodes
         the key names and the markers that resume from them -- a space as ``+``, a literal
@@ -3093,7 +3073,7 @@ class TestObjectVersionsPaging:
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
     async def test_version_id_marker_is_resumed_verbatim(self, auth, credentials, settings):
-        """CX2-1 / 決定-23: ``EncodingType=url`` covers the key names, not the version ids.
+        """``EncodingType=url`` covers the key names, not the version ids.
 
         S3 percent-encodes what it derived from a key -- ``Key``, ``Prefix``, ``Delimiter``,
         ``KeyMarker``/``NextKeyMarker`` -- because those are the values a key name can make
@@ -3134,7 +3114,7 @@ class TestObjectVersionsPaging:
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
     async def test_a_marker_that_is_not_repeated_is_dropped(self, auth, credentials, settings):
-        """CX2-2 / T-3: a ``VersionIdMarker`` belongs to the page that announced it.
+        """A ``VersionIdMarker`` belongs to the page that announced it.
 
         A page boundary can fall in the middle of one key's version history, and then S3 sends
         both markers.  The next boundary need not: once the listing has moved on to whole keys
@@ -3179,7 +3159,7 @@ class TestObjectVersionsPaging:
     @pytest.mark.aiohttpretty
     async def test_a_listing_that_is_not_encoded_is_read_verbatim(self, auth, credentials,
                                                                   settings):
-        """CX1-3: decoding is the response's declaration, not an assumption.
+        """Decoding is the response's declaration, not an assumption.
 
         A bucket listed without ``EncodingType`` answers with the key names as stored, and a
         key may legitimately contain a percent sign.  Decoding one of those would rename the
@@ -3262,7 +3242,7 @@ def s3_client_error(code, status, operation='HeadObject'):
 
 
 def assert_no_secrets(exc):
-    """K-9 / CX1-6: not in the message, and not in the traceback either.
+    """Not in the message, and not in the traceback either.
 
     Converting an exception into a safe one is not enough on its own.  ``raise X`` inside an
     ``except`` leaves the original hanging off ``__context__``, and
@@ -3270,7 +3250,7 @@ def assert_no_secrets(exc):
     the whole chain is formatted into the log.  Under SigV4 the original's message is the
     presigned request URL -- ``exception_from_response``'s default -- which carries
     ``X-Amz-Credential`` (the access key id) and ``X-Amz-Signature``.  The client response is
-    clean; the log is not, and K-9 covers the log.
+    clean; the log is not, and the log is covered here too.
     """
     blob = '{!r} {!s} {}'.format(exc, exc, getattr(exc, 'message', ''))
     blob += ''.join(traceback.format_exception(type(exc), exc, exc.__traceback__))
@@ -3333,7 +3313,7 @@ class local_server:
         return False
 
 
-# K-4 / 決定-13.  The commit's outcome is one of three things: it succeeded, it definitely
+# The commit's outcome is one of three things: it succeeded, it definitely
 # did not happen, or nobody knows.  The third one is the one that needs saying out loud.
 #
 # An unknown code and a missing code both fall to UNKNOWN.  That is the fail-safe direction:
@@ -3389,11 +3369,11 @@ def commit_error_xml(error_code):
 def arrange_chunked_commit(provider, aborted=True):
     """Set up ``_chunked_upload`` so that only the commit fails.
 
-    ``_complete_multipart_upload`` itself is deliberately left real:
-    NOTE_SEMANTICS_DESIGN v2.2 §4-2d -- a test that judges the notice must not mock any of
-    the code that decides it.  The injection goes to the boundary below (``make_request``).
+    ``_complete_multipart_upload`` itself is deliberately left real: a test that judges the
+    notice must not mock any of the code that decides it.  The injection goes to the boundary
+    below (``make_request``).
 
-    T-1 / CX1-11: which is also why the presigner is no longer stood in for here.  The commit
+    Which is also why the presigner is no longer stood in for here.  The commit
     signs a URL on its way to the ``make_request`` that ``arrange_commit_failure`` replaces, so
     the real presigner runs and its output is simply not read -- a stub bought nothing, and left
     a signing failure invisible to the whole notice matrix.
@@ -3435,12 +3415,12 @@ def arrange_commit_failure(provider, transport, error_code):
 
 
 class TestErrorReporting:
-    """K-2 / K-7 / K-8 / K-9: what the six aiobotocore call sites do with a failure."""
+    """What the six aiobotocore call sites do with a failure."""
 
     @pytest.mark.asyncio
     async def test_generate_presigned_url_reports_the_code_not_s3_prose(self, auth, credentials,
                                                                        settings, mock_time):
-        """K-2: name the failure by type and S3 error code.  botocore's own message quotes S3's
+        """Name the failure by type and S3 error code.  botocore's own message quotes S3's
         prose, which carries the request id and the host id."""
         provider = raw_provider(auth, credentials, settings)
         patcher, _ = patch_aiobotocore_client(
@@ -3458,7 +3438,7 @@ class TestErrorReporting:
     @pytest.mark.asyncio
     async def test_get_bucket_location_converts_a_client_error(self, auth, credentials, settings,
                                                                mock_time):
-        """K-2: this site has no handler at all, so a botocore ``ClientError`` escapes the
+        """This site has no handler at all, so a botocore ``ClientError`` escapes the
         provider as itself and the API layer can only answer 500 with no code."""
         provider = raw_provider(auth, credentials, settings)
         patcher, _ = patch_aiobotocore_client(
@@ -3475,7 +3455,7 @@ class TestErrorReporting:
     @pytest.mark.asyncio
     async def test_delete_objects_reports_the_code_not_s3_prose(self, auth, credentials, settings,
                                                                 mock_time):
-        """K-2: keep S3's status rather than flattening every refusal to 500."""
+        """Keep S3's status rather than flattening every refusal to 500."""
         provider = raw_provider(auth, credentials, settings)
         patcher, _ = patch_aiobotocore_client(
             delete_objects=MockCoroutine(
@@ -3500,7 +3480,7 @@ class TestErrorReporting:
     ])
     async def test_cancellation_is_not_swallowed(self, auth, credentials, settings, mock_time,
                                                  site, method, call):
-        """K-7: Python 3.6 derives ``asyncio.CancelledError`` from ``Exception``, so the broad
+        """Python 3.6 derives ``asyncio.CancelledError`` from ``Exception``, so the broad
         ``except Exception`` around each of these calls catches it.  Reporting a cancelled request
         as a provider failure stops the cancellation from propagating, and the task never ends."""
         provider = raw_provider(auth, credentials, settings)
@@ -3514,7 +3494,7 @@ class TestErrorReporting:
     @pytest.mark.asyncio
     async def test_chunked_upload_cancellation_is_not_swallowed(self, auth, credentials, settings,
                                                                 mock_time):
-        """K-7: same for the multi-part upload's handler, which additionally fires off an abort."""
+        """Same for the multi-part upload's handler, which additionally fires off an abort."""
         provider = raw_provider(auth, credentials, settings)
         provider._create_upload_session = MockCoroutine(return_value='SESSION')
         provider._upload_parts = MockCoroutine(side_effect=asyncio.CancelledError())
@@ -3526,7 +3506,7 @@ class TestErrorReporting:
     @pytest.mark.asyncio
     async def test_chunked_upload_does_not_log_the_presigned_url(self, auth, credentials, settings,
                                                                  mock_time, caplog):
-        """K-8/K-9: the handler logs ``repr()`` of whatever was raised.  Everything raised out of
+        """The handler logs ``repr()`` of whatever was raised.  Everything raised out of
         ``make_request`` reprs to the request URL, so the signature and the access key id land in
         the log of every failed multi-part upload."""
         provider = raw_provider(auth, credentials, settings)
@@ -3548,7 +3528,7 @@ class TestErrorReporting:
     @pytest.mark.asyncio
     async def test_intra_copy_error_reporting_is_unchanged(self, auth, credentials, settings,
                                                            mock_time):
-        """I-2 folded into the shared helper: same message, same status."""
+        """Folded into the shared helper: same message, same status."""
         provider = raw_provider(auth, credentials, settings)
         dest = raw_provider(auth, credentials, settings)
         dest.exists = MockCoroutine(return_value=False)
@@ -3569,16 +3549,16 @@ class TestErrorReporting:
     @pytest.mark.aiohttpretty
     async def test_delete_folder_reports_a_failed_listing_as_a_delete_failure(
             self, auth, credentials, settings, mock_time):
-        """CX1-13 / K-12: a folder delete that cannot list what to delete is a delete failure.
+        """A folder delete that cannot list what to delete is a delete failure.
 
         The listing is made with ``throws=DownloadError``, and nothing between there and the
         caller changes it: the user asked to delete a folder and is told a download went wrong,
-        with a status borrowed from an operation they did not ask for.  K-12's "core handles it"
+        with a status borrowed from an operation they did not ask for.  "Core handles it"
         holds only while the error carries no ``data``; S3 answers this with a readable XML body,
         so ``exception_from_response`` puts its prose -- request id and host id included -- into
         ``message`` and core hands that straight back.
 
-        T-1 / CX1-11: signed by the real presigner, injected at the HTTP boundary.
+        Signed by the real presigner, injected at the HTTP boundary.
         """
         provider = raw_provider(auth, credentials, settings)
         path = WaterButlerPath('/doomed-folder/')
@@ -3605,7 +3585,7 @@ class TestErrorReporting:
 
 
 class TestResponseParsing:
-    """K-10 / CX1-10: what each XML shape the provider can be handed turns into.
+    """What each XML shape the provider can be handed turns into.
 
     Every case here is a 200.  That is the point: the body is the only thing that says what
     happened, so a shape the provider cannot read has to become an error rather than an empty
@@ -3613,7 +3593,7 @@ class TestResponseParsing:
     ``_delete_folder`` acts on the difference -- "no versions under this prefix" is how it
     decides there is nothing to purge.
 
-    T-1 / CX1-11: signed by the real presigner, injected at the HTTP boundary.
+    Signed by the real presigner, injected at the HTTP boundary.
     """
 
     FOLDER_PARAMS = {'Bucket': 'that-kerning', 'Prefix': 'my-subfolder/'}
@@ -3655,7 +3635,7 @@ class TestResponseParsing:
     @pytest.mark.aiohttpretty
     async def test_folder_listing_rejects_an_unrecognised_root_element(self, auth, credentials,
                                                                        settings, mock_time):
-        """K-10: ``doc.get('ListBucketResult', {})`` answers ``{}`` for any body whose root
+        """``doc.get('ListBucketResult', {})`` answers ``{}`` for any body whose root
         element is not spelled exactly that -- a namespace-prefixed one, say -- and an empty
         listing is indistinguishable from an empty folder.  Fail closed instead."""
         provider = raw_provider(auth, credentials, settings)
@@ -3675,7 +3655,7 @@ class TestResponseParsing:
     @pytest.mark.aiohttpretty
     async def test_version_listing_rejects_an_unrecognised_root_element(self, auth, credentials,
                                                                         settings, mock_time):
-        """K-10: the same shape on the versions listing decides what a delete purges.  An empty
+        """The same shape on the versions listing decides what a delete purges.  An empty
         list means "nothing to delete", so a delete would report success having removed nothing."""
         provider = raw_provider(auth, credentials, settings)
         body = ('<?xml version="1.0" encoding="UTF-8"?>'
@@ -3693,7 +3673,7 @@ class TestResponseParsing:
     @pytest.mark.aiohttpretty
     async def test_folder_listing_accepts_a_whitespace_formatted_body(self, auth, credentials,
                                                                       settings, mock_time):
-        """K-10: indentation between the elements must not change the result."""
+        """Indentation between the elements must not change the result."""
         provider = raw_provider(auth, credentials, settings)
         body = ('<?xml version="1.0" encoding="UTF-8"?>\n'
                 '<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">\n'
@@ -3712,7 +3692,7 @@ class TestResponseParsing:
     @pytest.mark.aiohttpretty
     async def test_folder_listing_accepts_a_single_contents_element(self, auth, credentials,
                                                                     settings, mock_time):
-        """K-10: xmltodict collapses a lone repeated element to a dict rather than a
+        """xmltodict collapses a lone repeated element to a dict rather than a
         one-element list."""
         provider = raw_provider(auth, credentials, settings)
 
@@ -3727,7 +3707,7 @@ class TestResponseParsing:
     @pytest.mark.aiohttpretty
     async def test_folder_listing_rejects_an_empty_body(self, auth, credentials, settings,
                                                         mock_time):
-        """K-10: an empty 200 must not read as an empty folder."""
+        """An empty 200 must not read as an empty folder."""
         provider = raw_provider(auth, credentials, settings)
 
         with frozen_signing_clock():
@@ -3741,7 +3721,7 @@ class TestResponseParsing:
     @pytest.mark.parametrize('element', ['Contents', 'CommonPrefixes'])
     async def test_folder_listing_rejects_a_scalar_where_elements_belong(
             self, auth, credentials, settings, mock_time, element):
-        """CX1-10: failing closed on the root element alone stops one step short.  xmltodict
+        """Failing closed on the root element alone stops one step short.  xmltodict
         renders ``<Contents>text</Contents>`` as a string, and iterating a string yields its
         characters -- ``'t'.get('Key')`` is an ``AttributeError``, which escapes the provider
         as a bare 500 saying nothing.  The shape is unreadable for the same reason the root
@@ -3762,7 +3742,7 @@ class TestResponseParsing:
     @pytest.mark.parametrize('element', ['Version', 'DeleteMarker'])
     async def test_version_listing_rejects_a_scalar_where_elements_belong(
             self, auth, credentials, settings, mock_time, element):
-        """CX1-10: the same on the listing a folder delete is built from."""
+        """The same on the listing a folder delete is built from."""
         provider = raw_provider(auth, credentials, settings)
         body = ('<?xml version="1.0" encoding="UTF-8"?>'
                 '<ListVersionsResult><IsTruncated>false</IsTruncated>'
@@ -3778,7 +3758,7 @@ class TestResponseParsing:
     @pytest.mark.aiohttpretty
     async def test_folder_listing_rejects_a_truncation_it_cannot_resume(self, auth, credentials,
                                                                         settings, mock_time):
-        """CX1-10: ``IsTruncated`` true with no ``NextContinuationToken`` leaves the loop with
+        """``IsTruncated`` true with no ``NextContinuationToken`` leaves the loop with
         nothing to change, so it re-sends the identical request for ever.  Neither that nor
         quietly returning the first page is safe -- the caller would take a partial listing for
         the whole folder -- so it fails closed."""
@@ -3798,7 +3778,7 @@ class TestResponseParsing:
     @pytest.mark.aiohttpretty
     async def test_version_listing_rejects_a_truncation_it_cannot_resume(self, auth, credentials,
                                                                          settings, mock_time):
-        """CX1-10: the versions listing stopped quietly instead, which is worse than it sounds
+        """The versions listing stopped quietly instead, which is worse than it sounds
         -- ``_delete_folder`` deletes exactly what this returns, so a folder delete would
         report success having purged only the first page and left the rest behind."""
         provider = raw_provider(auth, credentials, settings)
@@ -3839,13 +3819,13 @@ async def commit(provider):
 
 
 class TestCompleteMultipartUpload:
-    """K-1 / K-3: committing a multi-part upload."""
+    """Committing a multi-part upload."""
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
     async def test_complete_rejects_a_200_carrying_an_error(self, auth, credentials, settings,
                                                             mock_time):
-        """K-3: S3 answers CompleteMultipartUpload with 200 and an ``<Error>`` body when the
+        """S3 answers CompleteMultipartUpload with 200 and an ``<Error>`` body when the
         assembly fails part way through, because the status line is already on the wire by then.
         ``expects=(200, 201)`` reads that as a completed upload."""
         provider = raw_provider(auth, credentials, settings)
@@ -3867,7 +3847,7 @@ class TestCompleteMultipartUpload:
     @pytest.mark.aiohttpretty
     async def test_complete_accepts_a_200_carrying_a_result(self, auth, credentials, settings,
                                                             mock_time):
-        """K-3: the success body must still be accepted."""
+        """The success body must still be accepted."""
         provider = raw_provider(auth, credentials, settings)
 
         with frozen_signing_clock():
@@ -3898,12 +3878,12 @@ class TestCompleteMultipartUpload:
     async def test_complete_rejects_a_200_that_does_not_report_success(self, auth, credentials,
                                                                        settings, mock_time,
                                                                        label, body):
-        """CX1-4 / K-3: only a ``CompleteMultipartUploadResult`` carrying an ``ETag`` says the
+        """Only a ``CompleteMultipartUploadResult`` carrying an ``ETag`` says the
         object was assembled.  Everything else here reached ``isinstance(error, dict)``, found
         no dict, and returned as if the upload had completed -- the user is told the file is
         there and it is not.
 
-        NOTE_SEMANTICS_DESIGN v2.2 §2 wants "2xx *and* a well-formed body" before a commit
+        "2xx *and* a well-formed body" is wanted before a commit
         counts as done; a body nobody can read is not evidence either way, so these are UNKNOWN
         and the notice has to be on them.
         """
@@ -3923,7 +3903,7 @@ class TestCompleteMultipartUpload:
     @pytest.mark.aiohttpretty
     async def test_complete_keeps_classifying_a_rejection_it_can_read(self, auth, credentials,
                                                                        settings, mock_time):
-        """CX1-4: tightening the success gate must not turn a readable rejection into UNKNOWN.
+        """Tightening the success gate must not turn a readable rejection into UNKNOWN.
         ``EntityTooSmall`` is the one code in DEFINITIVE_REJECTION_CODES that was actually
         observed on a commit, so the commit did not happen and the user must not be told it
         may have."""
@@ -3943,7 +3923,7 @@ class TestCompleteMultipartUpload:
     @pytest.mark.asyncio
     async def test_chunked_upload_says_so_when_the_abort_succeeded(self, auth, credentials,
                                                                    settings, mock_time):
-        """K-1: pin the ``if not aborted:`` branch.  The two messages differ in whether the user
+        """Pin the ``if not aborted:`` branch.  The two messages differ in whether the user
         is told to go and clean up the leftover parts by hand."""
         provider = raw_provider(auth, credentials, settings)
         provider._create_upload_session = MockCoroutine(return_value='SESSION')
@@ -3961,7 +3941,7 @@ class TestCompleteMultipartUpload:
     @pytest.mark.asyncio
     async def test_chunked_upload_says_so_when_the_abort_failed(self, auth, credentials, settings,
                                                                 mock_time):
-        """K-1: the other side of the same branch."""
+        """The other side of the same branch."""
         provider = raw_provider(auth, credentials, settings)
         provider._create_upload_session = MockCoroutine(return_value='SESSION')
         provider._upload_parts = MockCoroutine(return_value=[])
@@ -3977,7 +3957,7 @@ class TestCompleteMultipartUpload:
 
 
 class TestChunkedUploadWireQuery:
-    """R-6 / U-9 / CX1-2: what the part, abort and list-parts requests put on the wire.
+    """What the part, abort and list-parts requests put on the wire.
 
     A presigned URL already carries every parameter it was signed over.  Passing the same
     parameters again as ``make_request(params=...)`` does not overwrite them: ``ClientRequest``
@@ -4024,7 +4004,7 @@ class TestChunkedUploadWireQuery:
 
     @pytest.mark.asyncio
     async def test_part_request_sends_each_parameter_once(self, auth, credentials, settings):
-        """CX1-2: ``partNumber`` and ``uploadId`` are in the signed URL, so ``_upload_part``
+        """``partNumber`` and ``uploadId`` are in the signed URL, so ``_upload_part``
         must not add them a second time.  On ``ca65500e`` both arrive twice."""
         provider = raw_provider(auth, credentials, settings)
         stream = streams.StringStream(b'abcdefghij')
@@ -4087,7 +4067,7 @@ class TestChunkedUploadWireQuery:
     @pytest.mark.asyncio
     async def test_uploading_parts_logs_nothing_at_error_level(self, auth, credentials, settings,
                                                                 caplog):
-        """CL M-2: ``_upload_parts`` opens with ``logger.error('_upload_parts')``.
+        """``_upload_parts`` opens with ``logger.error('_upload_parts')``.
 
         Every multi-part upload that goes perfectly emits an ERROR saying only the name of the
         method it is in.  That is what an alert routes on and what an operator reads first, so a
@@ -4109,7 +4089,7 @@ class TestChunkedUploadWireQuery:
 
 
 class TestCommitPreconditions:
-    """K-5 / 決定-12: the commit has to be sent exactly once.
+    """The commit has to be sent exactly once.
 
     CompleteMultipartUpload is not idempotent.  A re-send after the first attempt succeeded
     meets a consumed ``UploadId`` and comes back ``NoSuchUpload``, so whatever code is
@@ -4126,7 +4106,7 @@ class TestCommitPreconditions:
         """Counting the POSTs pins that ``retry=0`` takes effect.  Inspecting the caller only
         pins that it is written down.
 
-        T-1 / CX1-11: the URL being counted is the one the real presigner produced for this
+        The URL being counted is the one the real presigner produced for this
         commit, not a constant.  ``retry_on`` matches on the status, but core's retry re-sends
         the *same* URL, so answering the real one is what makes "exactly once" a statement
         about the commit request rather than about a string the test chose.
@@ -4161,7 +4141,7 @@ class TestCommitPreconditions:
 
         ``aiohttpretty`` cannot pin this; see ``local_server``.
 
-        T-1 / CX1-11: the first route is mounted on the path the real presigner signed, and the
+        The first route is mounted on the path the real presigner signed, and the
         request reaches it through ``redirect_presigned_origin`` -- only the scheme and host are
         rewritten, because a test cannot listen on ``s3.amazonaws.com``.  So what the redirect is
         offered is the commit's own URL, and a signing change that moved the path would be a
@@ -4211,12 +4191,12 @@ class TestCommitPreconditions:
     @pytest.mark.asyncio
     async def test_commit_request_states_both_preconditions(self, auth, credentials, settings,
                                                             mock_time):
-        """NOTE_SEMANTICS_DESIGN v2.2 §4-2b: watch the preconditions directly, not only
+        """Watch the preconditions directly, not only
         through their effect.  The two counting tests above go through aiohttp, so a future
         change that keeps the observable single-send by accident -- core dropping the retry
         loop, say -- would leave them green while the commit stopped declaring what it needs.
 
-        T-1 / CX1-11: ``make_request`` is the boundary being watched, so the presigner above it
+        ``make_request`` is the boundary being watched, so the presigner above it
         is left real -- its URL is signed and then simply not sent anywhere.
         """
         provider = raw_provider(auth, credentials, settings)
@@ -4236,7 +4216,7 @@ class TestCommitPreconditions:
                                              '_abort_chunked_upload'])
     async def test_the_other_upload_requests_keep_the_defaults(self, auth, credentials,
                                                                settings, method_name):
-        """決定-12 scopes the two keywords to the commit.  Part transfers and session
+        """The two keywords are scoped to the commit.  Part transfers and session
         creation are idempotent enough that a re-send changes nothing the notice depends on,
         and turning core's retry off for them would trade a recoverable blip for a failed
         upload."""
@@ -4246,11 +4226,10 @@ class TestCommitPreconditions:
 
 
 class TestCommitOutcome:
-    """K-4 / 決定-13: what the user is told when a multi-part commit fails.
+    """What the user is told when a multi-part commit fails.
 
-    Ported from PR #98 (``tests/providers/s3compatsigv4/test_provider.py``); the design is
-    ``S3CompatSigv4-quota-handling/NOTE_SEMANTICS_DESIGN.md`` v2.2 §2-2 / §3-2〜3-4 / §4-1 /
-    §4-2d.  The outcome has three values -- success, NOT_COMMITTED, UNKNOWN -- and the
+    Ported from PR #98 (``tests/providers/s3compatsigv4/test_provider.py``).  The outcome has
+    three values -- success, NOT_COMMITTED, UNKNOWN -- and the
     difference that matters is the last two: "the file was not saved" tells the user to
     upload again, and saying it when the object is in fact on the storage costs a second
     copy that only an administrator can remove.
@@ -4260,12 +4239,12 @@ class TestCommitOutcome:
     ``_check_for_200_error``-style handling rewrites that to 5xx, so the status says "server
     error" for answers the storage was perfectly definite about.
 
-    Two deviations from #98, both recorded in PHASE_TK2_REPORT:
+    Two deviations from #98:
 
-    * the quota-suppression branch is **not** ported -- K-11 established that the ``s3``
+    * the quota-suppression branch is **not** ported -- the ``s3``
       provider has no quota mechanism at all (absent from ``ADDON_METHOD_PROVIDER`` and from
       ``website/util/quota.py``'s ``PROVIDERS``), so there is no quota response to suppress;
-    * K-1's abort-outcome wording is kept and the notice is combined with it, rather than
+    * the abort-outcome wording is kept and the notice is combined with it, rather than
       replacing it as #98 does.
     """
 
@@ -4337,7 +4316,7 @@ class TestCommitOutcome:
     ])
     async def test_the_notice_is_combined_with_the_abort_outcome(
             self, auth, credentials, settings, mock_time, aborted, abort_message):
-        """K-1's two abort messages stay, and the K-4 notice goes *between* the failure
+        """The two abort messages stay, and the notice goes *between* the failure
         sentence and them.  The two answer different questions -- "is the object there?" and
         "is there rubbish left behind?" -- and dropping either leaves the user without the
         half they need to act on."""
@@ -4377,7 +4356,7 @@ class TestCommitOutcome:
     @pytest.mark.asyncio
     async def test_a_failure_before_the_commit_does_not_claim_one(self, auth, credentials,
                                                                   settings, mock_time):
-        """NOTE_SEMANTICS_DESIGN v2.2 §3-3: "sent" begins at the commit ``await``.  A part
+        """The "sent" line begins at the commit ``await``.  A part
         that fails never gets there, so the notice must not appear -- it would send the user
         looking for a file that was never assembled."""
         provider = raw_provider(auth, credentials, settings)
@@ -4395,7 +4374,7 @@ class TestCommitOutcome:
     @pytest.mark.parametrize('where', ['commit-request', 'commit-read'])
     async def test_a_general_exception_inside_the_commit_claims_one(
             self, auth, credentials, settings, mock_time, where):
-        """NOTE_SEMANTICS_DESIGN v2.2 §4-2d: the mark has to be applied to *any* exception
+        """The mark has to be applied to *any* exception
         that escapes the commit, not only to the ones WaterButler recognises.
 
         Both injection points sit on the boundary -- the request and the response read --
@@ -4424,7 +4403,7 @@ class TestCommitOutcome:
     @pytest.mark.parametrize('status', [200, 500])
     async def test_a_commit_answered_in_invalid_utf8_claims_one(self, auth, credentials,
                                                                 settings, mock_time, status):
-        """CX2-2 / NOTE_SEMANTICS_DESIGN v2.2 §4-1: a body nobody can decode is UNKNOWN.
+        """A body nobody can decode is UNKNOWN.
 
         The matrix above reaches the general-exception cells by injecting a ``RuntimeError``
         into ``make_request``, and the illegible-body cells with a synthetic ``UploadError``.
@@ -4505,7 +4484,7 @@ class TestCommitOutcome:
                                                        ('InternalError', False)])
     def test_the_note_ignores_the_status_class(self, auth, credentials, settings, status,
                                                error_code, suppressed):
-        """決定-13's central claim, isolated from the transports: the status contributes
+        """The central claim, isolated from the transports: the status contributes
         nothing.  It cannot -- a failed commit's own status is 200."""
         provider = raw_provider(auth, credentials, settings)
         err = pd_provider._mark_commit_outcome_unknown(
@@ -4547,15 +4526,15 @@ class TestCommitOutcome:
         assert provider._observed_error_code(err) == expected
 
     def test_the_table_is_what_the_design_says_it_is(self, auth, credentials, settings):
-        """The table is transcribed from MinIO measurements in NOTE_SEMANTICS_DESIGN v2.2
-        §2-2 and is not verified against AWS S3 -- TEST_SPEC E-1 reconciles it.  Pinning the
-        exact set here means an addition has to be argued for, not slipped in."""
+        """The table is transcribed from MinIO measurements and is not verified against
+        AWS S3.  Pinning the exact set here means an addition has to be argued for, not
+        slipped in."""
         assert pd_provider.DEFINITIVE_REJECTION_CODES == frozenset(
             EXPECTED_DEFINITIVE_REJECTION_CODES)
 
 
 def assert_context_suppressed(exc):
-    """CX1-6 / K-9: nothing the provider refused to say is reachable through ``__context__``.
+    """Nothing the provider refused to say is reachable through ``__context__``.
 
     An exception raised inside an ``except`` keeps the original on ``__context__`` unless the
     ``raise`` says ``from None``, and ``traceback.format_exception`` -- which is what
@@ -4572,13 +4551,13 @@ def assert_context_suppressed(exc):
 
 
 class TestExceptionChaining:
-    """CX1-6 / K-9: the conversion points must not leave the original on the chain."""
+    """The conversion points must not leave the original on the chain."""
 
     @pytest.mark.asyncio
     @pytest.mark.aiohttpretty
     async def test_check_key_existence_does_not_chain_the_signed_url(self, auth, credentials,
                                                                       settings, mock_time):
-        """K-8/K-9: the HEAD path is where the original's message really is the presigned URL.
+        """The HEAD path is where the original's message really is the presigned URL.
         ``exception_from_response`` has no body to use on a HEAD, so it falls back to
         ``DEFAULT_ERROR_MSG``, which is the request URL -- and under SigV4 that URL carries
         ``X-Amz-Credential`` and ``X-Amz-Signature``.
@@ -4621,7 +4600,7 @@ class TestExceptionChaining:
             self, auth, credentials, settings, mock_time, abort_status):
         """``_chunked_upload`` composes its message precisely so that the failure is named
         without the storage's prose.  Raising it from inside the ``except`` puts that prose
-        back.  Both abort outcomes are taken: after CX1-5 the abort's own exception is caught
+        back.  Both abort outcomes are taken: the abort's own exception is caught
         too, and that handler is a second place a context can be picked up from."""
         provider = raw_provider(auth, credentials, settings)
         provider._create_upload_session = MockCoroutine(return_value='SESSION')
@@ -4664,7 +4643,7 @@ class TestExceptionChaining:
 
 
 class TestAbortFailureKeepsTheCommitNotice:
-    """CX1-5 / K-1 × K-4: the abort raising must not take the commit's verdict with it.
+    """The abort raising must not take the commit's verdict with it.
 
     ``_abort_chunked_upload`` returns ``False`` only when it got answers it could read and
     parts were still there.  Every other way it goes wrong -- the DELETE answering 404, 403 or

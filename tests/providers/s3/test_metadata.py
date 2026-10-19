@@ -177,7 +177,7 @@ class TestRevisionsMetadata:
 
 
 class TestNoHydrationHooks:
-    """CL M-1 / 決定-21: the S3 half of the removed Celery serialization hooks is gone too.
+    """The S3 half of the removed Celery serialization hooks is gone too.
 
     ``S3FileMetadataHeaders`` overrode ``_dehydrate``/``_rehydrate`` to carry ``_path`` through
     the payload.  With the base pair removed those overrides call a ``super()`` that no longer
