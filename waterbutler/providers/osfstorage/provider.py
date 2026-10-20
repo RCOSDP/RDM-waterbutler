@@ -478,8 +478,30 @@ class OSFStorageProvider(provider.BaseProvider):
         """
 
         created = True
+        replaced_size = 0
         if dest_path.identifier:
             created = False
+            try:
+                dest_meta = await dest_provider.metadata(dest_path)
+                if hasattr(dest_meta, 'size_as_int'):
+                    size_as_int = dest_meta.size_as_int
+                    if size_as_int is None:
+                        logger.warning(
+                            'dest_meta.size_as_int is None for %s (provider=%s, action=%s); '
+                            'treating replaced size as 0 for quota calculation',
+                            dest_path, dest_provider.NAME, action
+                        )
+                    elif size_as_int < 0:
+                        logger.warning(
+                            'dest_meta.size_as_int is negative (%s) for %s (provider=%s, action=%s); '
+                            'treating replaced size as 0 for quota calculation',
+                            size_as_int, dest_path, dest_provider.NAME, action
+                        )
+                    else:
+                        replaced_size = size_as_int
+            except Exception as e:
+                logger.error('Failed to fetch dest_meta for replaced_size calculation: %s', e)
+                raise exceptions.ProviderError({'message': 'Failed to fetch dest_meta for replaced_size calculation.'}, code=500)
             await dest_provider.delete(dest_path)
 
         resp = await self.make_signed_request(
@@ -492,7 +514,8 @@ class OSFStorageProvider(provider.BaseProvider):
                     'name': dest_path.name,
                     'node': dest_provider.nid,
                     'parent': dest_path.parent.identifier
-                }
+                },
+                'replaced_size': replaced_size,
             }),
             headers={'Content-Type': 'application/json'},
             expects=(200, 201)
