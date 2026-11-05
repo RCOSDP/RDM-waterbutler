@@ -26,7 +26,12 @@ task_queues = (
 )
 
 task_always_eager = config.get_bool('CELERY_ALWAYS_EAGER', False)
-result_backend = config.get_nullable('CELERY_RESULT_BACKEND', 'rpc://')
+# One result queue per task, as the amqp backend of Celery 4 did. The rpc backend collects
+# the results of a client in one queue and polls it with basic_get; a result left there by an
+# earlier task is fetched as an out-of-band message and never acknowledged, so RabbitMQ closes
+# the channel after its consumer timeout and the next task call fails.
+DEFAULT_RESULT_BACKEND = 'celery_amqp_backend.AMQPBackend://'
+result_backend = config.get_nullable('CELERY_RESULT_BACKEND', DEFAULT_RESULT_BACKEND)
 result_persistent = config.get_bool('CELERY_RESULT_PERSISTENT', True)
 worker_disable_rate_limits = config.get_bool('CELERY_DISABLE_RATE_LIMITS', True)
 result_expires = int(config.get('CELERY_TASK_RESULT_EXPIRES', 60))
