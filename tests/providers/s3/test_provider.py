@@ -9,14 +9,17 @@ import hashlib
 import inspect
 import logging
 import aiohttp
+import contextlib
 import datetime
 import traceback
 import xmltodict
 import aiohttpretty
 import botocore.auth
+import botocore.signers
 import botocore.exceptions
 from aiohttp import web
 from aiobotocore import session as aiobotocore_session
+from aiobotocore.awsrequest import AioAWSResponse
 from aiobotocore.client import AioBaseClient
 from http import client
 from urllib import parse
@@ -365,14 +368,17 @@ def raw_provider(auth, credentials, settings):
     return prov
 
 
-class _FrozenSigningClock(datetime.datetime):
-    """``datetime.datetime`` whose ``utcnow()`` does not move."""
-
-    @classmethod
-    def utcnow(cls):
-        return cls(2016, 2, 5, 14, 28, 50)
+FROZEN_SIGNING_TIME = datetime.datetime(2016, 2, 5, 14, 28, 50)
 
 
+def _frozen_current_datetime(remove_tzinfo=True):
+    """``botocore.compat.get_current_datetime`` whose answer does not move."""
+    if remove_tzinfo:
+        return FROZEN_SIGNING_TIME
+    return FROZEN_SIGNING_TIME.replace(tzinfo=datetime.timezone.utc)
+
+
+@contextlib.contextmanager
 def frozen_signing_clock():
     """Pin the clock botocore signs with, so a presigned URL is reproducible.
 
@@ -383,10 +389,13 @@ def frozen_signing_clock():
     only thing that differs between two otherwise identical signings is ``X-Amz-Date`` (one
     second of resolution) and the signature derived from it.  This replaces the clock and
     nothing else: parameter validation, serialisation and the HMAC all still happen for real.
+
+    botocore reads the clock through ``get_current_datetime``, which ``botocore.auth`` and
+    ``botocore.signers`` import by name, so it is replaced in both namespaces.
     """
-    shim = mock.Mock()
-    shim.datetime = _FrozenSigningClock
-    return mock.patch.object(botocore.auth, 'datetime', shim)
+    with mock.patch.object(botocore.auth, 'get_current_datetime', _frozen_current_datetime), \
+            mock.patch.object(botocore.signers, 'get_current_datetime', _frozen_current_datetime):
+        yield
 
 
 async def register_presigned(provider, http_method, s3_method, path='', query_parameters=None,
@@ -2440,21 +2449,27 @@ def make_client_error(code, message, status, operation='CopyObject'):
     )
 
 
-class _FakeHTTPResponse:
-    """The minimum surface ``aiobotocore.endpoint`` needs from an HTTP response.
+class _FakeRawBody:
+    """The ``raw`` of a response: what ``AioAWSResponse.content`` awaits ``read()`` on."""
 
-    ``convert_to_response_dict`` reads ``raw_headers``/``status_code`` and awaits ``read()``;
-    botocore's ``check_for_200_error`` reads ``content`` and *writes* ``status_code``.
+    def __init__(self, body):
+        self._body = body
+
+    async def read(self):
+        return self._body
+
+
+class _FakeHTTPResponse(AioAWSResponse):
+    """The HTTP response ``aiobotocore.endpoint`` hands to botocore.
+
+    ``convert_to_response_dict`` reads ``headers``/``status_code`` and awaits ``content``;
+    ``check_for_200_error`` awaits ``content`` and *writes* ``status_code``.  Deriving from
+    ``AioAWSResponse`` keeps that surface identical to what the real transport returns.
     """
 
     def __init__(self, status, body):
-        self.status_code = status
-        self.content = body
-        self.raw_headers = ((b'Content-Type', b'application/xml'),)
-        self.raw = None
-
-    async def read(self):
-        return self.content
+        super().__init__('https://s3.amazonaws.com/', status,
+                         {'Content-Type': 'application/xml'}, _FakeRawBody(body))
 
 
 def patch_session_with_before_send(monkeypatch, http_response_factory, operation='CopyObject'):
