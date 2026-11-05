@@ -1,63 +1,85 @@
-import os
 import asyncio
 import hashlib
-import functools
-from http import HTTPStatus
-from urllib import parse
 import logging
-import xml.sax.saxutils
-from xml.parsers.expat import ExpatError
-from io import BytesIO
-import base64
 
+from http import HTTPStatus
+from urllib.parse import unquote_plus
+import aiohttp
+import botocore.exceptions
 import xmltodict
-import boto3
-from botocore.config import Config
+import xml.sax.saxutils
+from aiobotocore.config import AioConfig
+from aiobotocore.session import get_session  # type: ignore
 
-from waterbutler.core import streams, provider, exceptions
+from waterbutler.providers.s3 import settings
 from waterbutler.core.path import WaterButlerPath
 from waterbutler.core.utils import make_disposition
-from waterbutler.providers.s3 import settings
-from waterbutler.providers.s3.metadata import (
-    S3Revision,
-    S3FileMetadata,
-    S3FolderMetadata,
-    S3FolderKeyMetadata,
-    S3FileMetadataHeaders,
-)
+from waterbutler.core import streams, provider, exceptions
+from waterbutler.providers.s3.metadata import (S3Revision,
+                                               S3FileMetadata,
+                                               S3FolderMetadata,
+                                               S3FolderKeyMetadata,
+                                               S3FileMetadataHeaders,
+                                               )
 
 logger = logging.getLogger(__name__)
 
 
-def compute_md5(fp):
-    """Compute MD5 hash for file-like object."""
-    m = hashlib.md5()
-    data = fp.read()
-    m.update(data)
-    fp.seek(0)
-    return m.digest(), base64.b64encode(m.digest()).decode('utf-8')
+# GRDM: the S3 error codes that prove CompleteMultipartUpload did not
+# assemble anything.  Everything else -- including every code absent from this table, and
+# the case where no code could be read at all -- leaves the commit's outcome UNKNOWN.
+#
+# The asymmetry is deliberate.  Over-reporting "it may have completed" costs the user a look
+# at the file list.  Under-reporting it tells the user nothing was stored, so they upload
+# again: the object is now on the storage twice, counted twice against their quota, and only
+# an administrator can undo that.  A hand-maintained table will eventually be out of date,
+# and it has to be out of date in the direction that stays recoverable.
+#
+# Provenance: transcribed from the MinIO measurements that came by way of PR #98.
+# **Not verified against AWS S3** -- only ``EntityTooSmall`` was actually observed on a
+# CompleteMultipartUpload (MinIO returned it and the object was absent afterwards); the
+# other eight rest on the S3 specification and on MinIO's own error definitions.
+#
+# ``NoSuchUpload`` is *not* here: a second commit meets a consumed ``UploadId`` and gets that
+# answer even when the first one succeeded, so it is the opposite of definitive.
+DEFINITIVE_REJECTION_CODES = frozenset({
+    'AccessDenied',           # no permission, so the commit never started
+    'InvalidPart',            # the part set does not add up; nothing to assemble
+    'InvalidPartOrder',       # likewise, out of order
+    'EntityTooSmall',         # a non-final part is under the minimum
+    'EntityTooLarge',         # over the size limit; the storage refused it
+    'MalformedXML',           # the commit body was unreadable
+    'SignatureDoesNotMatch',  # rejected at signature verification
+    'InvalidAccessKeyId',     # likewise, at authentication
+    'NoSuchBucket',           # there is nowhere for the object to exist
+})
+
+# The failure happened after the commit request went out, so the object may exist on the
+# storage even though the upload is being reported as failed.
+_COMMIT_OUTCOME_UNKNOWN_FLAG = '_wb_commit_outcome_unknown'
+
+# The S3 error code read out of a response body that WaterButler itself parsed.  Used where
+# the provider builds the exception rather than ``exception_from_response`` -- a 200 carrying
+# an ``<Error>`` body, whose code would otherwise only survive inside a prose message.
+_OBSERVED_ERROR_CODE_FLAG = '_wb_observed_error_code'
 
 
-class S3Connection:
-    def __init__(self, aws_access_key_id=None, aws_secret_access_key=None, region_name=None):
-        self.region_name = region_name or 'us-east-1'
+def _mark_commit_outcome_unknown(err):
+    setattr(err, _COMMIT_OUTCOME_UNKNOWN_FLAG, True)
+    return err
 
-        config = Config(signature_version='s3v4')
 
-        self.s3 = boto3.resource(
-            's3',
-            aws_access_key_id=aws_access_key_id,
-            aws_secret_access_key=aws_secret_access_key,
-            region_name=self.region_name,
-            config=config,
-        )
+def _is_commit_outcome_unknown(err):
+    return getattr(err, _COMMIT_OUTCOME_UNKNOWN_FLAG, False)
 
-    def generate_presigned_url(self, ClientMethod, Params=None, ExpiresIn=settings.TEMP_URL_SECS, HttpMethod=None):
-        return self.s3.meta.client.generate_presigned_url(ClientMethod, Params=Params, ExpiresIn=ExpiresIn, HttpMethod=HttpMethod)
+
+def _mark_observed_error_code(err, error_code):
+    setattr(err, _OBSERVED_ERROR_CODE_FLAG, error_code)
+    return err
 
 
 class S3Provider(provider.BaseProvider):
-    """Provider for S3 Compatible Storage (SigV4) service.
+    """Provider for Amazon's S3 cloud storage service.
 
     API docs: http://docs.aws.amazon.com/AmazonS3/latest/API/Welcome.html
 
@@ -78,11 +100,19 @@ class S3Provider(provider.BaseProvider):
     CONTIGUOUS_UPLOAD_SIZE_LIMIT = settings.CONTIGUOUS_UPLOAD_SIZE_LIMIT
     FILE_SIZE_INTRA_COPY_LIMIT = settings.FILE_SIZE_INTRA_COPY_LIMIT
 
+    # GRDM: appended to an upload failure when the commit's outcome is UNKNOWN.  The
+    # wording is PR #98's, unchanged, so that the two providers say the same thing.
+    UPLOAD_MAY_HAVE_COMPLETED_MESSAGE = (
+        '  The upload may in fact have completed; please check the file list before '
+        'uploading the file again.'
+    )
+
     def __init__(self, auth, credentials, settings, **kwargs):
         """
         .. note::
 
-            Neither `S3Connection#__init__` nor `Bucket()` sends a request.
+            Neither `S3Connection#__init__` nor `S3Connection#get_bucket`
+            sends a request.
 
         :param dict auth: Not used
         :param dict credentials: Dict containing `access_key` and `secret_key`
@@ -90,251 +120,754 @@ class S3Provider(provider.BaseProvider):
         """
         super().__init__(auth, credentials, settings, **kwargs)
 
-        self.aws_access_key_id = credentials['access_key']
         self.aws_secret_access_key = credentials['secret_key']
-        self.bucket_name = self.settings['bucket']
+        self.aws_access_key_id = credentials['access_key']
+        self.bucket_name = settings['bucket']
+        self.base_folder = self._get_base_folder(self.settings)
         self.encrypt_uploads = self.settings.get('encrypt_uploads', False)
         self.region = None
-        self.connection = S3Connection(
-            aws_access_key_id=self.aws_access_key_id,
-            aws_secret_access_key=self.aws_secret_access_key,
-        )
-        self.bucket = self.connection.s3.Bucket(self.bucket_name)
+
+    @staticmethod
+    def _get_base_folder(provider_settings):
+        """GRDM: the sub-folder part of the addon's ``id``, which is ``<bucket>:/<folder>``.
+
+        Every path this provider handles is built by prefixing this, so it decides which keys
+        the request can reach at all.  An ``id`` that is missing, or that does not carry the
+        ``:/`` separator, is answered with ``''`` -- the bucket root -- rather than being
+        guessed at from whatever the string happens to contain: a wrong prefix here does not
+        fail, it silently addresses a different part of the bucket.
+        """
+        _, separator, base_folder = (provider_settings.get('id') or ':/').partition(':/')
+        return base_folder if separator else ''
+
+    @staticmethod
+    def _error_code_of(error_element):
+        """GRDM: the ``<Code>`` of a parsed S3 ``<Error>``, or ``None``.
+
+        Case is not folded and nothing is matched as a substring.  S3 error codes are
+        identifiers that agree between vendors down to the case, and a substring match would
+        let ``XAccessDeniedFoo`` pass for ``AccessDenied``.
+        """
+        code = error_element.get('Code')
+        if not isinstance(code, str):
+            return None
+        return code.strip() or None
+
+    @classmethod
+    def _error_code_from_body(cls, body):
+        """GRDM: the S3 error code in ``body``, or ``None`` when it cannot be read.
+
+        A body that does not parse, or parses to something that is not an ``<Error>``, is no
+        code at all.  The storage said *something* went wrong but not what, which is UNKNOWN.
+        """
+        if not body:
+            return None
+        try:
+            doc = xmltodict.parse(body)
+        except Exception:
+            return None
+        error = doc.get('Error')
+        if not isinstance(error, dict):
+            return None
+        return cls._error_code_of(error)
+
+    @classmethod
+    def _observed_error_code(cls, err):
+        """GRDM: the S3 error code WaterButler actually *saw*, or ``None``.
+
+        Only a response body may speak for the storage.  That gate is the point of this
+        helper: a dropped connection carries an aiohttp message of its own, and without the
+        gate an exception whose message happened to contain S3-looking XML would be
+        classified as if the storage had answered.  A disconnect is exactly the case where
+        nothing was observed.
+
+        Three sources, in order:
+
+        1. a code the provider parsed out of a body itself -- see
+           :data:`_OBSERVED_ERROR_CODE_FLAG`;
+        2. botocore's ``ClientError``, which carries the code in ``response['Error']``;
+        3. ``exception_from_response``'s ``data``, which is a ``dict`` only when a response
+           body was actually read.  Anything else -- a plain string message, a connection
+           error with no ``data`` at all -- yields ``None``.
+        """
+        explicit = getattr(err, _OBSERVED_ERROR_CODE_FLAG, None)
+        if explicit is not None:
+            return explicit
+
+        if isinstance(err, botocore.exceptions.ClientError):
+            response = getattr(err, 'response', None)
+            if not isinstance(response, dict):
+                return None
+            return response.get('Error', {}).get('Code') or None
+
+        data = getattr(err, 'data', None)
+        if not isinstance(data, dict):
+            return None
+        return cls._error_code_from_body(data.get('response'))
+
+    @classmethod
+    def _commit_outcome(cls, error_code):
+        """GRDM: whether ``error_code`` proves the commit did not happen.
+
+        ``None`` -- no code, or none that could be read -- is UNKNOWN, as is any code
+        outside :data:`DEFINITIVE_REJECTION_CODES`.
+
+        The two outcomes are named NOT_COMMITTED and UNKNOWN.  The ``bool`` here is those two
+        names spelled ``True`` and ``False``; it stays a ``bool`` because the only caller
+        uses it as a condition, and a string would have to be compared against a constant
+        that a typo could silently defeat.
+        """
+        return error_code is not None and error_code in DEFINITIVE_REJECTION_CODES
+
+    @classmethod
+    def _commit_outcome_note(cls, err):
+        """GRDM: the notice to append when the commit's outcome is genuinely unknown.
+
+        The decision is made from the storage's error code alone.  The HTTP status class is
+        deliberately *not* consulted: S3 sends the status line before it starts assembling
+        the parts, so a failed CompleteMultipartUpload arrives as **200** with an ``<Error>``
+        body, and the 502 this provider substitutes for it says "server error" about a
+        response the storage was quite definite about.
+
+        This is sound only because the commit is sent exactly once (in
+        ``_complete_multipart_upload``).  Under a re-send the observed code belongs to the
+        *last* attempt, and a first attempt that succeeded comes back ``NoSuchUpload`` --
+        at which point classifying by code says nothing about the upload.
+
+        PR #98 suppresses the notice for quota exhaustion ahead of the table, because "you
+        are out of space" and "it may have completed" contradict each other.  That branch is
+        **not** ported: this provider has no quota mechanism at all --
+        ``s3`` is in neither ``settings.ADDON_METHOD_PROVIDER`` nor ``website/util/quota.py``'s
+        ``PROVIDERS`` -- so there is no quota response here to suppress.
+        """
+        if not _is_commit_outcome_unknown(err):
+            return ''
+        if cls._commit_outcome(cls._observed_error_code(err)):
+            return ''
+        return cls.UPLOAD_MAY_HAVE_COMPLETED_MESSAGE
+
+    @staticmethod
+    def _raise_from_client_error(exc, context, error_class, code=None):
+        """GRDM: re-raise ``exc`` as ``error_class``, naming only what is safe to name.
+
+        A failure is reported as the exception's type name plus, where S3 supplied one, its
+        error code.  Neither of the messages that come with these exceptions is copied over:
+
+        * botocore's ``ClientError`` message quotes S3's own prose, which carries the request
+          id and the host id.
+        * everything raised out of ``make_request`` is built by
+          :func:`waterbutler.core.exceptions.exception_from_response`, whose default message is
+          the request URL.  Under SigV4 that URL is a presigned one, so it carries
+          ``X-Amz-Credential`` -- which contains the access key id -- and ``X-Amz-Signature``.
+          ``waterbutler.server.api.v1.core.write_error`` hands ``exc.message`` to the client.
+
+        :param Exception exc: what was caught at the call site
+        :param str context: the path, or the operation, the failure belongs to
+        :param error_class: the WaterButler exception to raise instead
+        :param int code: the status to report; ``None`` takes S3's own
+        :raises: ``error_class``, or ``exc`` unchanged when it is a cancellation
+        """
+        if isinstance(exc, asyncio.CancelledError):
+            # Python 3.6 derives CancelledError from Exception, so the broad excepts that guard
+            # these calls catch it.  A cancelled request is not a provider failure: it has to
+            # keep unwinding or the task it belongs to never actually stops.
+            raise exc
+
+        response = getattr(exc, 'response', None)
+        if isinstance(response, dict):
+            description = '{} {}'.format(
+                type(exc).__name__, response.get('Error', {}).get('Code') or 'unknown')
+            status = response.get('ResponseMetadata', {}).get('HTTPStatusCode')
+            if not isinstance(status, int) or status < 400:
+                # S3 answers some operations with 200 and an <Error> body when they fail part
+                # way through.  botocore rewrites the response's status code to 500 so that the
+                # call raises, but leaves the original 200 in ResponseMetadata.  Passing that on
+                # would report the operation as having succeeded.
+                status = 500
+        elif isinstance(exc, exceptions.WaterButlerError):
+            description = '{} {}'.format(type(exc).__name__, exc.code)
+            status = exc.code
+        else:
+            # A transport failure -- EndpointConnectionError, TimeoutError, aiohttp's client
+            # errors -- has no status of its own.
+            description = type(exc).__name__
+            status = None
+
+        # GRDM: `from None`, because the point of this method is that `exc` must
+        # not be repeated.  Left on `__context__` it is still formatted by
+        # `traceback.format_exception`, which is what `waterbutler.server.api.v1.core`'s
+        # `log_exception` reaches through `exc_info` -- so a message this method deliberately
+        # refused to copy goes into the log anyway.  On a HEAD that message is the presigned
+        # URL, carrying `X-Amz-Credential` and `X-Amz-Signature`.
+        raise error_class('{}: {}'.format(context, description),
+                          code=code or status or 500) from None
+
+    async def generate_generic_presigned_url(self, path, method='head_object', query_parameters=None, default_params=True):
+        try:
+            session = get_session()
+            region_name = {'region_name': self.region} if self.region else {}
+            # GRDM: the endpoint is pinned to the regional host rather than left to botocore.
+            # SigV4 signs over the host, so the host that is signed has to be the host the
+            # request is sent to; botocore's default `s3.amazonaws.com` answers a bucket outside
+            # us-east-1 with a 301 redirect, and following that to the regional host invalidates
+            # the signature.  Before `_check_region` has run `self.region` is None and the global
+            # endpoint is all there is to sign against -- which is why GetBucketLocation, the
+            # call that fills it in, is the one operation that works from either host.
+            # The same reasoning applies at the other three `create_client` sites.
+            endpoint_url = {'endpoint_url': f'https://s3.{self.region}.amazonaws.com'} if self.region else {'endpoint_url': 'https://s3.amazonaws.com'}
+            config = AioConfig(signature_version='s3v4')
+
+            async with session.create_client(
+                    's3',
+                    aws_secret_access_key=self.aws_secret_access_key,
+                    aws_access_key_id=self.aws_access_key_id,
+                    config=config,
+                    **region_name,
+                    **endpoint_url
+            ) as s3_client:
+                params = {'Bucket': self.bucket_name, 'Key': path} if default_params else {}
+                if query_parameters:
+                    params.update(query_parameters)
+                resp = await s3_client.generate_presigned_url(method, Params=params, ExpiresIn=settings.TEMP_URL_SECS)
+                return resp
+        except Exception as exc:
+            # The status stays 404 whatever S3 said, because `BaseProvider.exists` reads a
+            # NotFoundError of any status as "no", and every caller of this method goes through
+            # it.  Reporting the real status is a separate change.
+            self._raise_from_client_error(exc, path, exceptions.NotFoundError,
+                                          code=HTTPStatus.NOT_FOUND)
+
+    async def check_key_existence(self, path, expects=(200, ), query_parameters=None):
+        try:
+            session = get_session()
+            region_name = {"region_name": self.region} if self.region else {}
+            # GRDM: pinned to the regional endpoint -- see `generate_generic_presigned_url`.
+            endpoint_url = {'endpoint_url': f'https://s3.{self.region}.amazonaws.com'} if self.region else {'endpoint_url': 'https://s3.amazonaws.com'}
+            config = AioConfig(signature_version='s3v4')
+            query_parameters = query_parameters or {}
+
+            async with session.create_client(
+                    's3',
+                    aws_secret_access_key=self.aws_secret_access_key,
+                    aws_access_key_id=self.aws_access_key_id,
+                    config=config,
+                    **region_name,
+                    **endpoint_url
+            ) as s3_client:
+                params = {'Bucket': self.bucket_name, 'Key': path}
+                if query_parameters:
+                    params.update(query_parameters)
+
+                url = await s3_client.generate_presigned_url('head_object', Params=params, ExpiresIn=settings.TEMP_URL_SECS)
+
+                return await self.make_request(
+                    'HEAD',
+                    url,
+                    expects=expects,
+                    throws=exceptions.MetadataError,
+                )
+        except Exception as e:
+            # See `generate_generic_presigned_url` for why the status stays 404.
+            self._raise_from_client_error(e, path, exceptions.NotFoundError,
+                                          code=HTTPStatus.NOT_FOUND)
+
+    async def get_s3_bucket_object_location(self):
+        try:
+            session = get_session()
+            config = AioConfig(signature_version='s3v4')
+            async with session.create_client(
+                    's3',
+                    aws_secret_access_key=self.aws_secret_access_key,
+                    aws_access_key_id=self.aws_access_key_id,
+                    config=config
+            ) as s3_client:
+                # Docs: https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/s3/client/get_bucket_location.html#
+                url = await s3_client.generate_presigned_url('get_bucket_location', Params={'Bucket': self.bucket_name}, ExpiresIn=settings.TEMP_URL_SECS)
+                resp = await self.make_request(
+                    'GET',
+                    url,
+                    expects=(200, ),
+                    throws=exceptions.MetadataError,
+                )
+                return resp
+        except Exception as e:
+            # GRDM: this is the first request of every operation, so an unconverted botocore
+            # error here surfaces as a bare 500 with nothing in it the caller can act on.
+            self._raise_from_client_error(e, 'GetBucketLocation', exceptions.MetadataError)
+
+    #: GRDM: the elements a listing repeats.  xmltodict renders a repeated element as a list,
+    #: a single occurrence as a dict, and an element with only text in it as a string -- so the
+    #: shape has to be settled once, where the body is read, rather than at each use of it.
+    _LISTING_ENTRY_ELEMENTS = ('Contents', 'CommonPrefixes', 'Version', 'DeleteMarker')
+
+    @classmethod
+    def _parse_listing(cls, xml_body, root_element, path):
+        """GRDM: read ``root_element`` out of a listing response, or fail.
+
+        ``xmltodict`` keys elements by the name as written, so a body that spells its root
+        ``<s3:ListBucketResult>`` -- or one that is not XML at all -- leaves a plain
+        ``.get(root_element, {})`` answering ``{}``.  That is the same answer an empty bucket
+        gives, and nothing downstream can tell the two apart: a folder would list as empty, and
+        a delete would report success having found no version to remove.
+
+        The entries inside it are checked for the same reason.  ``<Contents>a</Contents>``
+        parses to a string, and iterating a string yields its characters, so the first
+        ``'a'.get('Key')`` leaves the provider as an ``AttributeError`` -- a bare 500 that names
+        neither the bucket nor what was wrong with its answer.  A body nobody can read is a
+        failed listing, which is what the root-element check already says; this says it one level
+        further in.
+
+        :param str xml_body: the response body
+        :param str root_element: the element the listing is expected to be wrapped in
+        :param str path: the prefix being listed, used for error messages only
+        :rtype: dict
+        :raises: :class:`.DownloadError` if the body does not carry a readable ``root_element``
+        """
+        try:
+            doc = xmltodict.parse(xml_body)
+        except Exception:
+            doc = {}
+
+        result = doc.get(root_element)
+        if not isinstance(result, dict):
+            raise exceptions.DownloadError(
+                'Could not read a {} out of the listing of {}'.format(root_element, path),
+                code=HTTPStatus.BAD_GATEWAY
+            )
+
+        for element in cls._LISTING_ENTRY_ELEMENTS:
+            entries = result.get(element)
+            if entries is None:
+                continue
+            if isinstance(entries, dict):
+                entries = [entries]
+            if not isinstance(entries, list) or not all(isinstance(e, dict) for e in entries):
+                raise exceptions.DownloadError(
+                    'Could not read the {} entries out of the listing of {}'.format(element, path),
+                    code=HTTPStatus.BAD_GATEWAY
+                )
+            result[element] = entries
+
+        return result
+
+    @staticmethod
+    def _next_marker(result, marker_element, path):
+        """GRDM: the value to resume a truncated listing from, or ``None`` when it ended.
+
+        A listing that says it is truncated and then gives nothing to resume from is
+        unresumable, and neither way of carrying on is safe: repeating the request sends the
+        identical one for ever, and stopping hands back a first page that every caller takes for
+        the whole folder -- ``_delete_folder`` would purge that page and report the folder
+        deleted with the rest of it still there.
+
+        :param dict result: the parsed listing
+        :param str marker_element: ``NextContinuationToken`` or ``NextKeyMarker``
+        :param str path: the prefix being listed, used for error messages only
+        :return: the marker, or ``None`` when this was the last page
+        :raises: :class:`.DownloadError` when truncated with no marker
+        """
+        if result.get('IsTruncated') != 'true':
+            return None
+
+        marker = result.get(marker_element)
+        if not marker:
+            raise exceptions.DownloadError(
+                'The listing of {} is truncated but carries no {}, so the rest of it cannot '
+                'be read'.format(path, marker_element),
+                code=HTTPStatus.BAD_GATEWAY
+            )
+
+        return marker
+
+    @staticmethod
+    def _decoder_for(result):
+        """GRDM: the rule for reading key names out of ``result``.
+
+        botocore asks every listing for ``encoding-type=url``, so S3 answers with the values it
+        derived from key names -- the keys, the prefixes and the key markers -- form-urlencoded
+        (a space as ``+``, a literal ``+`` as ``%2B``) and says so in ``EncodingType``.  Such a
+        value is read with ``unquote_plus``, as botocore does.
+
+        Decoding has to follow what the response declares rather than being assumed: a bucket
+        that answers without ``EncodingType`` is reporting the names verbatim, and decoding
+        those would corrupt any key that legitimately contains a ``%`` or a ``+``.  Values S3
+        minted itself -- a version id, a continuation token -- are opaque and are not encoded,
+        so this decoder is not theirs to apply.
+
+        A key marker matters twice over.  It is read out of one response and sent back as a
+        query parameter on the next request, where the signer encodes it again -- so a marker
+        kept encoded is asked for as ``f%252Fa%252Bb`` and the page is never found.
+
+        :param dict result: the parsed listing
+        :return: a callable that turns a value from ``result`` back into the name
+        """
+        if result.get('EncodingType') == 'url':
+            return unquote_plus
+        return lambda value: value
+
+    async def get_folder_metadata(self, path, params, next_token=None):
+        """List the keys and common prefixes under ``params['Prefix']``.
+
+        :param str path: the prefix being listed, used for error messages only
+        :param dict params: the ListObjectsV2 query parameters
+        :param str next_token: GRDM: when not ``None``, return a single page starting at this
+            continuation token (``''`` for the first page) instead of draining the listing.
+            ``None`` keeps the default behaviour of returning everything.
+        :return: ``(contents, prefixes, continuation_token)``.  The token is the one to ask for
+            the next page with, or ``''`` when there is no next page.
+        """
+        contents, response_contents, response_prefixes = [], [], []
+        continuation_token = None
+
+        # GRDM: the file browser pages through a folder, so one page has to be a bounded
+        # request the UI can resume from.  Everyone else -- BaseProvider._folder_file_op,
+        # BaseProvider.zip, ZipStreamGenerator -- wants the whole listing in one call.
+        single_page = next_token is not None
+        if single_page:
+            # An int, not a string: botocore validates the parameter types before it signs, so
+            # a string here raises ParamValidationError and the page never reaches S3.
+            params['MaxKeys'] = 1000
+            if next_token:
+                params['ContinuationToken'] = next_token
+
+        while True:
+            if continuation_token:
+                params['ContinuationToken'] = continuation_token
+
+            # Docs: https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/s3/client/get_paginator.html
+            # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/s3/client/list_objects_v2.html#list-objects-v2
+            list_url = await self.generate_generic_presigned_url(
+                '', 'list_objects_v2', query_parameters=params, default_params=False
+            )
+
+            resp = await self.make_request(
+                'GET', list_url,
+                expects=(200, 206),
+                throws=exceptions.DownloadError
+            )
+            xml_body = await resp.text()
+            result = self._parse_listing(xml_body, 'ListBucketResult', path)
+
+            contents = result.get('Contents') or []
+            common_prefixes = result.get('CommonPrefixes') or []
+
+            decode = self._decoder_for(result)
+
+            for content in contents:
+                key = content.get('Key')
+                if key:
+                    content['Key'] = decode(key)
+                    response_contents.append(content)
+
+            for common_prefix in common_prefixes:
+                prefix = common_prefix.get('Prefix')
+                if prefix:
+                    common_prefix['Prefix'] = decode(prefix)
+                    response_prefixes.append(common_prefix)
+
+            # handle pagination
+            continuation_token = self._next_marker(result, 'NextContinuationToken', path)
+            if continuation_token is None:
+                break
+
+            if single_page:
+                break
+
+        return response_contents, response_prefixes, continuation_token or ''
+
+    async def delete_objects_in_chunks(self, path, delete_requests):
+        """Send ``delete_requests`` to DeleteObjects in batches of 1000, the API maximum.
+
+        :param str path: the path being deleted, used for error messages only
+        :param list delete_requests: ``{'Key': ...}`` or ``{'Key': ..., 'VersionId': ...}`` dicts
+        :raises: :class:`.DeleteError` if any object in any batch was not deleted
+        """
+        if not delete_requests:
+            # DeleteObjects rejects an empty object list.
+            return
+
+        session = get_session()
+        region_name = {"region_name": self.region} if self.region else {}
+        # GRDM: pinned to the regional endpoint -- see `generate_generic_presigned_url`.
+        endpoint_url = {'endpoint_url': f'https://s3.{self.region}.amazonaws.com'} if self.region else {'endpoint_url': 'https://s3.amazonaws.com'}
+        async with session.create_client(
+                's3',
+                aws_secret_access_key=self.aws_secret_access_key,
+                aws_access_key_id=self.aws_access_key_id,
+                **region_name,
+                **endpoint_url
+        ) as s3_client:
+            for index in range(0, len(delete_requests), 1000):
+                chunk = delete_requests[index:index + 1000]
+                try:
+                    result = await s3_client.delete_objects(
+                        Bucket=self.bucket_name,
+                        # GRDM: Quiet=False so that per-object failures are reported back.
+                        Delete={"Objects": chunk, "Quiet": False}
+                    )
+                except Exception as e:
+                    self._raise_from_client_error(e, path, exceptions.DeleteError)
+
+                # GRDM: DeleteObjects answers 200 even when individual objects were refused.
+                # Fail closed, and name the survivors so the caller can retry them.
+                errors = (result or {}).get('Errors') or []
+                if errors:
+                    survivors = ', '.join(
+                        '{}({}) {}'.format(error.get('Key'),
+                                           error.get('VersionId') or 'null',
+                                           error.get('Code'))
+                        for error in errors
+                    )
+                    raise exceptions.DeleteError(
+                        'Failed to delete {} of {} objects under {}: {}'.format(
+                            len(errors), len(chunk), path, survivors)
+                    )
+
+    async def get_object_versions(self, query_parameters, include_delete_markers=False):
+        """List every version of the keys matched by ``query_parameters``.
+
+        :param dict query_parameters: ListObjectVersions parameters, e.g. ``Prefix``
+        :param bool include_delete_markers: also return the ``DeleteMarker`` entries.  Off by
+            default so that :func:`revisions` keeps returning real revisions only; a delete
+            marker is not something a user can restore or download.
+        :rtype: list of dict
+        """
+        # GRDM: a copy, and a `Bucket` the caller does not have to remember to supply.
+        # ListObjectVersions is signed over its parameters, so a missing `Bucket` is not a
+        # default that botocore fills in -- the call fails to sign.  `setdefault` rather than an
+        # assignment because :func:`_delete_folder` and :func:`revisions` pass only a `Prefix`
+        # while the paging tests pass a whole parameter set, and the copy is so that the markers
+        # this method writes while paging do not leak back into the caller's dict.
+        query_parameters = dict(query_parameters)
+        query_parameters.setdefault('Bucket', self.bucket_name)
+
+        versions_result = []
+        while True:
+
+            # Docs: https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/s3/client/list_object_versions.html
+            list_url = await self.generate_generic_presigned_url(
+                '', 'list_object_versions', query_parameters=query_parameters, default_params=False
+            )
+
+            resp = await self.make_request(
+                'GET', list_url,
+                expects=(200, 206),
+                throws=exceptions.DownloadError
+            )
+            xml_body = await resp.text()
+            result = self._parse_listing(xml_body, 'ListVersionsResult',
+                                         query_parameters.get('Prefix', ''))
+
+            decode = self._decoder_for(result)
+
+            element_names = ['Version', 'DeleteMarker'] if include_delete_markers else ['Version']
+            for element_name in element_names:
+                entries = result.get(element_name) or []
+
+                for entry in entries:
+                    key = entry.get('Key')
+                    if key:
+                        entry['Key'] = decode(key)
+                        versions_result.append(entry)
+
+            # GRDM: ListObjectVersions does not page with the ListObjectsV2 continuation token.
+            # It resumes from the last key *and* the last version id, because one key can hold
+            # more pages of versions than fit in a response -- a page boundary can fall in the
+            # middle of a key's history, and `KeyMarker` alone would restart that key from its
+            # newest version and loop over the same page.  `VersionIdMarker` is removed rather
+            # than left behind when the response does not carry one: S3 rejects it without a
+            # `KeyMarker` of the same page, and a stale one asks to resume from a version that
+            # belongs to the key before this one.
+            next_key_marker = self._next_marker(result, 'NextKeyMarker',
+                                                query_parameters.get('Prefix', ''))
+            if next_key_marker is None:
+                break
+
+            next_version_id_marker = result.get('NextVersionIdMarker')
+            query_parameters['KeyMarker'] = decode(next_key_marker)
+            if next_version_id_marker:
+                # GRDM: a version id is opaque and is not covered by `EncodingType=url`, which
+                # encodes only what S3 derived from a key name -- decoding one would resume from
+                # a version that does not exist.
+                query_parameters['VersionIdMarker'] = next_version_id_marker
+            else:
+                query_parameters.pop('VersionIdMarker', None)
+
+        return versions_result
 
     async def validate_v1_path(self, path, **kwargs):
         await self._check_region()
-        wbpath = WaterButlerPath(path)
-        if path == '/':
-            return wbpath
+
+        path = f"/{self.base_folder + path.lstrip('/')}"
 
         implicit_folder = path.endswith('/')
 
-        prefix = wbpath.full_path.lstrip('/')  # '/' -> '', '/A/B' -> 'A/B'
         if implicit_folder:
-            query_parameters = {
-                'Bucket': self.bucket_name,
-                'Prefix': prefix,
-                'Delimiter': '/',
-            }
-            resp = await self.make_request(
+
+            query_parameters = {'Bucket': self.bucket_name, 'Prefix': path, 'Delimiter': '/', 'MaxKeys': 1}
+
+            # Docs: https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/s3/client/list_objects_v2.html
+            url = await self.generate_generic_presigned_url(path, method='list_objects_v2',
+                                                            query_parameters=query_parameters, default_params=False)
+            await self.make_request(
                 'GET',
-                functools.partial(
-                    self.connection.generate_presigned_url,
-                    'list_objects',
-                    Params=query_parameters,
-                    HttpMethod='GET',
-                ),
-                expects=(
-                    HTTPStatus.OK,
-                    HTTPStatus.NOT_FOUND,
-                ),
-                throws=exceptions.MetadataError,
+                url,
+                expects=(200, 206,),
+                throws=exceptions.NotFoundError,
             )
         else:
-            query_parameters = {'Bucket': self.bucket_name, 'Key': prefix}
-            resp = await self.make_request(
-                'HEAD',
-                functools.partial(
-                    self.connection.generate_presigned_url,
-                    'head_object',
-                    Params=query_parameters,
-                    HttpMethod='HEAD',
-                ),
-                expects=(
-                    HTTPStatus.OK,
-                    HTTPStatus.NOT_FOUND,
-                ),
-                throws=exceptions.MetadataError,
-            )
+            await self.check_key_existence(path[1:], expects=(200, ))
 
-        await resp.release()
-
-        if resp.status == HTTPStatus.NOT_FOUND:
-            raise exceptions.NotFoundError(str(prefix))
-
-        return wbpath
+        return WaterButlerPath(path)
 
     async def validate_path(self, path, **kwargs):
-        return WaterButlerPath(path)
+        # The user selected base folder, the root of the where that user's node is connected.
+        return WaterButlerPath(f"/{self.base_folder + path.lstrip('/')}")
 
     def can_duplicate_names(self):
         return True
 
     def can_intra_copy(self, dest_provider, path=None, file_size=None):
+        """GRDM: server-side copy only while the size is known and within CopyObject's limit.
+
+        CopyObject is capped at 5 GB; above that S3 requires the multi-part copy API, which this
+        provider does not implement, so the call would fail after the user had been told the copy
+        was under way.  An unknown size is refused for the same reason -- it may be over the cap
+        -- and the caller falls back to streaming the file through WaterButler, which always
+        works.  ``ACCEPTS_FILE_SIZE_FOR_INTRA`` is what makes core offer ``file_size`` here.
+        """
         if file_size is None or file_size > self.FILE_SIZE_INTRA_COPY_LIMIT:
             return False
-        return type(self) is type(dest_provider) and not path.is_dir
+        return type(self) == type(dest_provider) and not path.is_dir
 
     def can_intra_move(self, dest_provider, path=None, file_size=None):
+        """GRDM: an intra move is a CopyObject followed by a delete, so it has the same cap.
+
+        See :func:`can_intra_copy`.
+        """
         if file_size is None or file_size > self.FILE_SIZE_INTRA_COPY_LIMIT:
             return False
-        return type(self) is type(dest_provider) and not path.is_dir
+        return type(self) == type(dest_provider) and not path.is_dir
 
     async def intra_copy(self, dest_provider, source_path, dest_path):
-        """Copy key from one S3 Compatible Storage bucket to another. The credentials specified in
+        """Copy key from one S3 bucket to another. The credentials specified in
         `dest_provider` must have read access to `source.bucket`.
         """
         await self._check_region()
         exists = await dest_provider.exists(dest_path)
 
-        # ensure no left slash when joining paths
-        copy_source = os.path.join(self.settings['bucket'], source_path.full_path.lstrip('/'))
-        headers = {'x-amz-copy-source': '/' + parse.quote(copy_source)}
-        query_parameters = {
-            'Bucket': dest_provider.bucket_name,
-            'Key': dest_path.full_path,
-            'CopySource': copy_source,
-        }
-        resp = await self.make_request(
-            'PUT',
-            functools.partial(
-                dest_provider.connection.generate_presigned_url,
-                'copy_object',
-                Params=query_parameters,
-                HttpMethod='PUT',
-            ),
-            skip_auto_headers={'CONTENT-TYPE'},
-            headers=headers,
-            expects=(HTTPStatus.OK,),
-            throws=exceptions.IntraCopyError,
-        )
+        # GRDM: signed by the *destination*, which is what the docstring above
+        # promises and what develop does -- it builds the URL from `dest_provider`'s key.  Signing
+        # with the source's key instead made the documented permission useless: granting the
+        # destination read access to the source did nothing, and what the copy actually needed
+        # was for the source to be able to write to the destination -- the opposite grant, which
+        # nothing tells an operator to make.  The region travels with the credentials: SigV4
+        # signs the region into the scope and the host into the request, and CopyObject is a
+        # write to the destination bucket, so a destination outside the source's region would
+        # otherwise be signed for the wrong one and refused before the object was ever read.
+        await dest_provider._check_region()
+        region = dest_provider.region
+        region_name = {"region_name": region} if region else {}
+        # GRDM: pinned to the regional endpoint -- see `generate_generic_presigned_url`.
+        endpoint_url = {'endpoint_url': f'https://s3.{region}.amazonaws.com'} if region else {'endpoint_url': 'https://s3.amazonaws.com'}
 
-        response_body = await resp.read()
-        self._check_for_200_error(response_body, 'CopyObject', exceptions.IntraCopyError)
+        session = get_session()
+        async with session.create_client(
+                's3',
+                aws_secret_access_key=dest_provider.aws_secret_access_key,
+                aws_access_key_id=dest_provider.aws_access_key_id,
+                **region_name,
+                **endpoint_url
+        ) as s3_client:
+            copy_source = {
+                'Bucket': self.bucket_name,
+                'Key': source_path.path,
+            }
+            try:
+                await s3_client.copy_object(
+                    Bucket=dest_provider.bucket_name,
+                    Key=dest_path.path,
+                    CopySource=copy_source,
+                )
+            except Exception as e:
+                # GRDM: report the failure without quoting S3's own message, which carries
+                # request ids, arns and bucket names, and keep the provider's status code
+                # instead of flattening everything to a 500.
+                #
+                # GRDM: `Exception`, not `ClientError`.  `ClientError` is only what S3
+                # answered with; the ways this call fails without an answer -- the endpoint not
+                # resolving, the read timing out, a parameter botocore refuses to sign, a
+                # response body that ends early -- are separate botocore and aiohttp types, and
+                # each of them used to leave the provider unconverted.  This is the one of the
+                # six aiobotocore call sites that was still narrow.  `_raise_from_client_error`
+                # re-raises a cancellation itself.
+                self._raise_from_client_error(e, 'CopyObject failed', exceptions.IntraCopyError)
 
-        await resp.release()
         return (await dest_provider.metadata(dest_path)), not exists
-
-    @staticmethod
-    def _check_for_200_error(
-        response_body,
-        s3_api_name='S3 API',
-        exception_type=exceptions.UnhandledProviderError,
-    ):
-        """check an S3 API result with http status is 200 OK.
-
-        try to parse response body as a xml.
-        if the xml has an 'Error' element then raise an exception.
-
-        :param str response_body: API response body.
-        :param str s3_api_name: S3 API name for logging.
-        :param type exception_type: raise Exception type
-        """
-        try:
-            # memo: If no element, the parser will raise an ExpatError.
-            result = xmltodict.parse(response_body)
-        except ExpatError:
-            logger.warning('Couldn\'t parse %s result', s3_api_name)
-            raise
-
-        if 'Error' in result:
-            error_code = result['Error'].get('Code', 'Unknown')
-            logger.warning('%s returned with an error: %s', s3_api_name, error_code)
-            raise exception_type(
-                f'{s3_api_name} returned with an error.',
-                code=HTTPStatus.INTERNAL_SERVER_ERROR,
-            )
 
     async def download(self, path, accept_url=False, revision=None, range=None, **kwargs):
         r"""Returns a ResponseWrapper (Stream) for the specified path
         raises FileNotFoundError if the status from S3 is not 200
 
-        :param path: ( :class:`.WaterButlerPath` ) Path to the key you want to download
-        :param kwargs: (dict) Additional arguments that are ignored
-        :rtype: :class:`waterbutler.core.streams.ResponseStreamReader`
+        :param str path: Path to the key you want to download
+        :param bool accept_url: GRDM: return the presigned URL instead of the bytes, so
+            that the server can redirect the client to S3.  This is the default on the download
+            route -- ``metadata.download_file`` passes ``'direct' not in query`` -- and it is how
+            develop behaves; the file then travels from S3 to the browser without passing through
+            WaterButler at all.
+        :param dict \*\*kwargs: Additional arguments that are ignored
+        :rtype: :class:`waterbutler.core.streams.ResponseStreamReader`, or :class:`str` when
+            ``accept_url`` is set
         :raises: :class:`waterbutler.core.exceptions.DownloadError`
         """
+
         await self._check_region()
+
         if not path.is_file:
-            raise exceptions.DownloadError('No file specified for download', code=HTTPStatus.BAD_REQUEST)
+            raise exceptions.DownloadError('No file specified for download', code=400)
 
-        # MEMO: This is a workaround for the bug on some callers.
-        if revision is None and 'version' in kwargs:
-            revision = kwargs['version']
+        query_parameters = {}
 
-        try:
-            pre_size, pre_etag = await self._get_content_whole_size(path, revision)
-            if range is not None:
-                # MEMO: range type is (int, int)
-                # see: core/provider.py _build_range_header()
-                s, e = range
-                if s is None or e is None:
-                    pre_size = None
-                elif s < 0 or s >= pre_size or e < 0 or e >= pre_size or e < s:
-                    pre_size = None
-                else:
-                    pre_size = e - s + 1
-        except exceptions.MetadataError:
-            logger.debug('Could not retrieve metadata for pre-flight check, skipping')
-            pre_size = None
-            pre_etag = None
-
+        # Todo: don't see where it may be set from front end side
         if not revision or revision.lower() == 'latest':
-            query_parameters = None
+            query_parameters = {}
         else:
-            query_parameters = {'VersionId': revision}
+            query_parameters['VersionId'] = revision
 
         display_name = kwargs.get('display_name') or path.name
-        response_headers = {
-            'ResponseContentDisposition': make_disposition(display_name)
-        }
+        query_parameters['ResponseContentDisposition'] = make_disposition(display_name)
 
-        query_parameters_dict = {'Bucket': self.bucket_name, 'Key': path.full_path}
-        if query_parameters:
-            query_parameters_dict.update(query_parameters)
-        query_parameters_dict.update(response_headers)
+        url = await self.generate_generic_presigned_url(path.path, 'get_object', query_parameters=query_parameters)
 
-        headers = {}
+        if accept_url:
+            # GRDM: hand the URL over rather than the bytes.  It is signed over the same
+            # parameters the streaming request below would have used -- the version asked for and
+            # the Content-Disposition that names the download -- and expires in
+            # `settings.TEMP_URL_SECS`, so what the client receives is the one object, for a
+            # short while, and not the credentials that reached it.  `range` is not applied here
+            # on purpose: the client re-sends its own Range to S3 when it follows the redirect.
+            return url
+
         resp = await self.make_request(
             'GET',
-            functools.partial(
-                self.connection.generate_presigned_url,
-                'get_object',
-                Params=query_parameters_dict,
-                HttpMethod='GET',
-            ),
+            url,
             range=range,
-            headers=headers,
-            expects=(HTTPStatus.OK, HTTPStatus.PARTIAL_CONTENT),
+            expects=(200, 206,),
             throws=exceptions.DownloadError,
         )
 
-        try:
-            get_etag = resp.headers['ETag'].replace('"', '')
-            if get_etag != pre_etag:
-                pre_size = None
-        except KeyError:
-            # ETag header may not be present in all responses
-            pass
-
-        download_stream = streams.ResponseStreamReader(resp)
-
-        if hasattr(download_stream, '_size') and download_stream._size is None:
-            # if the GetObject API doesn't return Content-Length header,
-            # use metadata content-size or range size instead of it.
-            download_stream._size = pre_size
-
-        return download_stream
-
-    async def _get_content_whole_size(self, path: WaterButlerPath, revision=None):
-        """get content whole size from path."""
-        metadata = await self.metadata(path, revision)
-        try:
-            size = metadata.size_as_int
-            etag = metadata.etag
-        except KeyError:
-            raise exceptions.MetadataError('Cannot get content size and ETag')
-        return size, etag
+        return streams.ResponseStreamReader(resp)
 
     async def upload(self, stream, path, conflict='replace', **kwargs):
-        """Uploads the given stream to S3 Compatible Storage
+        """Uploads the given stream to S3
 
-        :param waterbutler.core.streams.RequestWrapper stream: The stream to put to S3 Compatible Storage
-        :param path: ( :class:`.WaterButlerPath` ) The full path of the key to upload to/into
-
+        :param waterbutler.core.streams.RequestWrapper stream: The stream to put to S3
+        :param str path: The full path of the key to upload to/into
         :rtype: dict, bool
         """
+
         await self._check_region()
+
         path, exists = await self.handle_name_conflict(path, conflict=conflict)
 
         if stream.size < self.CONTIGUOUS_UPLOAD_SIZE_LIMIT:
@@ -345,33 +878,29 @@ class S3Provider(provider.BaseProvider):
         return (await self.metadata(path, **kwargs)), not exists
 
     async def _contiguous_upload(self, stream, path):
-        """Uploads the given stream in one request."""
+        """Uploads the given stream in one request.
+        """
 
         stream.add_writer('md5', streams.HashStreamWriter(hashlib.md5))
 
         headers = {'Content-Length': str(stream.size)}
-        query_parameters = {'Bucket': self.bucket_name, 'Key': path.full_path}
-
-        # this is usually set in boto3 presigned url, but do it here
-        # to be explicit about our header payloads for signing purposes
+        query_parameters = {}
+        # this is usually set in boto.s3.key.generate_url, but do it here
+        # do be explicit about our header payloads for signing purposes
         if self.encrypt_uploads:
             headers['x-amz-server-side-encryption'] = 'AES256'
+            query_parameters['ServerSideEncryption'] = 'AES256'
+
+        # Docs: https://boto3.amazonaws.com/v1/documentation/api/1.28.0/reference/services/s3/client/put_object.html
+        upload_url = await self.generate_generic_presigned_url(path.path, method='put_object', query_parameters=query_parameters)
 
         resp = await self.make_request(
             'PUT',
-            functools.partial(
-                self.connection.generate_presigned_url,
-                'put_object',
-                Params=query_parameters,
-                HttpMethod='PUT',
-            ),
+            upload_url,
             data=stream,
             skip_auto_headers={'CONTENT-TYPE'},
             headers=headers,
-            expects=(
-                HTTPStatus.OK,
-                HTTPStatus.CREATED,
-            ),
+            expects=(200, 201,),
             throws=exceptions.UploadError,
         )
         await resp.release()
@@ -381,24 +910,59 @@ class S3Provider(provider.BaseProvider):
             raise exceptions.UploadChecksumMismatchError()
 
     async def _chunked_upload(self, stream, path):
-        """Uploads the given stream to S3 over multiple chunks"""
-
+        """Uploads the given stream to S3 over multiple chunks
+        """
         # Step 1. Create a multi-part upload session
         session_upload_id = await self._create_upload_session(path)
-
         try:
             # Step 2. Break stream into chunks and upload them one by one
             parts_metadata = await self._upload_parts(stream, path, session_upload_id)
             # Step 3. Commit the parts and end the upload session
             await self._complete_multipart_upload(path, session_upload_id, parts_metadata)
+        except asyncio.CancelledError:
+            # GRDM: Python 3.6 derives CancelledError from Exception, so the handler below
+            # catches it.  Aborting the session and reporting an upload error would stop the
+            # cancellation from propagating, and the task it belongs to would never end.
+            raise
         except Exception as err:
             msg = 'An unexpected error has occurred during the multi-part upload.'
-            logger.error('{} upload_id={} error={!r}'.format(msg, session_upload_id, err))
-            aborted = await self._abort_chunked_upload(path, session_upload_id)
-            if aborted:
-                msg += '  The abort action failed to clean up the temporary file parts generated ' \
-                       'during the upload process.  Please manually remove them.'
-            raise exceptions.UploadError(msg)
+            # GRDM: name the error by type and status only.  Everything raised out of
+            # `make_request` reprs to the request URL, which under SigV4 is a presigned URL
+            # carrying `X-Amz-Credential` -- the access key id -- and `X-Amz-Signature`.
+            logger.error('{} upload_id={} error={} {}'.format(
+                msg, session_upload_id, type(err).__name__, getattr(err, 'code', '')))
+            # GRDM: whether the object is on the storage, and whether rubbish was left
+            # behind, are two different questions.  The notice goes between the failure
+            # sentence and the abort outcome so that both reach the user.
+            note = self._commit_outcome_note(err)
+            # GRDM: `_abort_chunked_upload` answers `False` only when it read the
+            # storage's replies and parts were still there.  Every other way it goes wrong --
+            # the DELETE answering 404, 403 or 500 -- leaves `make_request` raising, and that
+            # exception used to replace both `msg` and `note`, so a failed cleanup was all the
+            # user heard about.  A 404 `NoSuchUpload` here is the worst cell of that: it is
+            # what S3 says once the UploadId is consumed, which is the case where the commit
+            # did succeed and the user most needs to be told to go and look.
+            #
+            # An abort that raised cleaned nothing up, so it is reported as `False`.
+            try:
+                aborted = await self._abort_chunked_upload(path, session_upload_id)
+            except asyncio.CancelledError:
+                raise
+            except Exception as abort_err:
+                logger.error('Multi-part upload failed to abort: upload_id={} error={} {}'.format(
+                    session_upload_id, type(abort_err).__name__, getattr(abort_err, 'code', '')))
+                aborted = False
+            if not aborted:
+                abort_message = '  The abort action failed to clean up the temporary file ' \
+                                'parts generated during the upload process.  Please ' \
+                                'manually remove them.'
+            else:
+                abort_message = ' The upload is aborted.'
+            # GRDM: `from None` for the same reason as in
+            # `_raise_from_client_error` -- this message was composed to say what happened
+            # without the storage's prose, and `__context__` would put the prose back into the
+            # log.  `err` has already been logged above, by type and status only.
+            raise exceptions.UploadError('{}{}{}'.format(msg, note, abort_message)) from None
 
     async def _create_upload_session(self, path):
         """This operation initiates a multipart upload and returns an upload ID. This upload ID is
@@ -410,26 +974,19 @@ class S3Provider(provider.BaseProvider):
         """
 
         headers = {}
-        query_parameters = {'Bucket': self.bucket_name, 'Key': path.full_path}
+        kwargs = {}
         # "Initiate Multipart Upload" supports AWS server-side encryption
         if self.encrypt_uploads:
             headers = {'x-amz-server-side-encryption': 'AES256'}
+            kwargs["ServerSideEncryption"] = "AES256"
 
+        # Docs: # https://boto3.amazonaws.com/v1/documentation/api/1.28.0/reference/services/s3/client/create_multipart_upload.html
+        upload_session_url = await self.generate_generic_presigned_url(path.path, method='create_multipart_upload', query_parameters=kwargs)
         resp = await self.make_request(
             'POST',
-            functools.partial(
-                self.connection.generate_presigned_url,
-                'create_multipart_upload',
-                Params=query_parameters,
-                ExpiresIn=200,
-                HttpMethod='POST',
-            ),
+            upload_session_url,
             headers=headers,
             skip_auto_headers={'CONTENT-TYPE'},
-            expects=(
-                HTTPStatus.OK,
-                HTTPStatus.CREATED,
-            ),
             throws=exceptions.UploadError,
         )
         upload_session_metadata = await resp.read()
@@ -438,17 +995,18 @@ class S3Provider(provider.BaseProvider):
         return session_data['InitiateMultipartUploadResult']['UploadId']
 
     async def _upload_parts(self, stream, path, session_upload_id):
-        """Uploads all parts/chunks of the given stream to S3 one by one."""
-
+        """Uploads all parts/chunks of the given stream to S3 one by one.
+        """
         metadata = []
         parts = [self.CHUNK_SIZE for i in range(0, stream.size // self.CHUNK_SIZE)]
         if stream.size % self.CHUNK_SIZE:
             parts.append(stream.size - (len(parts) * self.CHUNK_SIZE))
-        logger.debug('Multipart upload segment sizes: {}'.format(parts))
+        logger.info(f'Multipart upload segment sizes: {parts}')
+
         for chunk_number, chunk_size in enumerate(parts):
-            logger.debug('  uploading part {} with size {}'.format(chunk_number + 1, chunk_size))
             metadata.append(await self._upload_part(stream, path, session_upload_id,
                                                     chunk_number + 1, chunk_size))
+
         return metadata
 
     async def _upload_part(self, stream, path, session_upload_id, chunk_number, chunk_size):
@@ -459,32 +1017,25 @@ class S3Provider(provider.BaseProvider):
 
         cutoff_stream = streams.CutoffStream(stream, cutoff=chunk_size)
 
-        headers = {'Content-Length': str(chunk_size)}
-        query_parameters = {
-            'Bucket': self.bucket_name,
-            'Key': path.full_path,
-            'PartNumber': chunk_number,
-            'UploadId': session_upload_id,
-        }
+        # Docs: https://boto3.amazonaws.com/v1/documentation/api/1.28.0/reference/services/s3/client/upload_part.html
+        upload_part_url = await self.generate_generic_presigned_url(
+            path.path, method='upload_part',
+            query_parameters={'ContentLength': chunk_size, 'PartNumber': chunk_number, 'UploadId': session_upload_id}
+        )
 
         resp = await self.make_request(
             'PUT',
-            functools.partial(
-                self.connection.generate_presigned_url,
-                'upload_part',
-                Params=query_parameters,
-                ExpiresIn=200,
-                HttpMethod='PUT',
-            ),
+            upload_part_url,
             data=cutoff_stream,
             skip_auto_headers={'CONTENT-TYPE'},
-            headers=headers,
-            expects=(
-                HTTPStatus.OK,
-                HTTPStatus.CREATED,
-            ),
+            headers={'Content-Length': str(chunk_size)},
+            # No `params=`: `PartNumber` and `UploadId` are already in the presigned URL, and
+            # aiohttp extends a URL's query rather than overwriting it, so passing them again
+            # sends each one twice and breaks the signature.
+            expects=(200, 201,),
             throws=exceptions.UploadError,
         )
+
         await resp.release()
         return resp.headers
 
@@ -508,49 +1059,41 @@ class S3Provider(provider.BaseProvider):
         """
 
         headers = {}
-        query_parameters = {
-            'Bucket': self.bucket_name,
-            'Key': path.full_path,
-            'UploadId': session_upload_id,
-        }
+        params = {'UploadId': session_upload_id}
+
+        abort_url = await self.generate_generic_presigned_url(path.path, method='abort_multipart_upload', query_parameters=params)
 
         iteration_count = 0
         is_aborted = False
-        while iteration_count < settings.CHUNKED_UPLOAD_MAX_ABORT_RETRIES:
-            try:
-                # ABORT
-                resp = await self.make_request(
-                    'DELETE',
-                    functools.partial(
-                        self.connection.generate_presigned_url,
-                        'abort_multipart_upload',
-                        Params=query_parameters,
-                        HttpMethod='DELETE',
-                    ),
-                    skip_auto_headers={'CONTENT-TYPE'},
-                    headers=headers,
-                    expects=(HTTPStatus.NO_CONTENT,),
-                    throws=exceptions.UploadError,
-                )
-                await resp.release()
 
-                # LIST PARTS
-                resp_xml, session_deleted = await self._list_uploaded_chunks(path, session_upload_id)
+        while iteration_count <= settings.CHUNKED_UPLOAD_MAX_ABORT_RETRIES:
 
-                if session_deleted:
-                    # Abort is successful if the session has been deleted
-                    is_aborted = True
-                    break
+            # ABORT
+            resp = await self.make_request(
+                'DELETE',
+                abort_url,
+                skip_auto_headers={'CONTENT-TYPE'},
+                headers=headers,
+                expects=(204,),
+                throws=exceptions.UploadError,
+            )
 
-                uploaded_chunks_list = xmltodict.parse(resp_xml, strip_whitespace=False)
-                parsed_parts_list = uploaded_chunks_list['ListPartsResult'].get('Part', [])
-                if len(parsed_parts_list) == 0:
-                    # Abort is successful when there is no part left
-                    is_aborted = True
-                    break
-            except Exception as err:
-                msg = 'An unexpected error has occurred during the aborting a multipart upload.'
-                logger.error('{} upload_id={} error={!r}'.format(msg, session_upload_id, err))
+            await resp.release()
+
+            # LIST PARTS
+            resp_xml, session_deleted = await self._list_uploaded_chunks(path, session_upload_id)
+
+            if session_deleted:
+                # Abort is successful if the session has been deleted
+                is_aborted = True
+                break
+
+            uploaded_chunks_list = xmltodict.parse(resp_xml, strip_whitespace=False)
+            parsed_parts_list = uploaded_chunks_list['ListPartsResult'].get('Part', [])
+            if len(parsed_parts_list) == 0:
+                # Abort is successful when there is no part left
+                is_aborted = True
+                break
 
             iteration_count += 1
 
@@ -570,35 +1113,24 @@ class S3Provider(provider.BaseProvider):
         """
 
         headers = {}
-        query_parameters = {
-            'Bucket': self.bucket_name,
-            'Key': path.full_path,
-            'UploadId': session_upload_id,
-        }
+        params = {'UploadId': session_upload_id}
+        list_url = await self.generate_generic_presigned_url(path.path, method='list_parts', query_parameters=params)
 
         resp = await self.make_request(
             'GET',
-            functools.partial(
-                self.connection.generate_presigned_url,
-                'list_parts',
-                Params=query_parameters,
-                HttpMethod='GET',
-            ),
+            list_url,
             skip_auto_headers={'CONTENT-TYPE'},
             headers=headers,
-            expects=(
-                HTTPStatus.OK,
-                HTTPStatus.CREATED,
-                HTTPStatus.NOT_FOUND,
-            ),
-            throws=exceptions.UploadError,
+            expects=(200, 201, 404,),
+            throws=exceptions.UploadError
         )
-        session_deleted = resp.status == HTTPStatus.NOT_FOUND
+        session_deleted = resp.status == 404
         resp_xml = await resp.read()
 
         return resp_xml, session_deleted
 
     async def _complete_multipart_upload(self, path, session_upload_id, parts_metadata):
+
         """This operation completes a multipart upload by assembling previously uploaded parts.
 
         Docs: https://docs.aws.amazon.com/AmazonS3/latest/API/mpUploadComplete.html
@@ -614,435 +1146,217 @@ class S3Provider(provider.BaseProvider):
             ),
             '</CompleteMultipartUpload>',
         ]).encode('utf-8')
-        headers = {
-            'Content-Length': str(len(payload)),
-            'Content-MD5': compute_md5(BytesIO(payload))[1],
-            'Content-Type': 'text/xml',
-        }
-        query_parameters = {
-            'Bucket': self.bucket_name,
-            'Key': path.full_path,
-            'UploadId': session_upload_id
-        }
 
-        resp = await self.make_request(
-            'POST',
-            functools.partial(
-                self.connection.generate_presigned_url,
-                'complete_multipart_upload',
-                Params=query_parameters,
-                ExpiresIn=200,
-                HttpMethod='POST',
-            ),
-            data=payload,
-            headers=headers,
-            expects=(
-                HTTPStatus.OK,
-                HTTPStatus.CREATED,
-            ),
-            throws=exceptions.UploadError,
+        complete_url = await self.generate_generic_presigned_url(
+            path.path, method='complete_multipart_upload', query_parameters={'UploadId': session_upload_id}
         )
 
-        response_body = await resp.read()
-        self._check_for_200_error(response_body, "CompleteMultipartUpload", exceptions.UploadError)
+        # GRDM: everything from here on belongs to a commit that has been sent.  Every
+        # exception that escapes gets marked, whatever its type -- the "sent" line is
+        # drawn at entering this ``await``, and narrowing the
+        # ``except`` to the exception types WaterButler recognises drops the notice on the
+        # rest.  A connection failure after entering the await may in fact never have put
+        # anything on the wire; that is not distinguishable here, so it goes to UNKNOWN,
+        # which is the recoverable side.
+        try:
+            resp = await self.make_request(
+                'POST',
+                complete_url,
+                data=payload,
+                headers={
+                    'Content-Type': 'application/xml',
+                    'Content-Length': str(len(payload)),
+                },
+                expects=(200, 201,),
+                throws=exceptions.UploadError,
+                # GRDM: the commit is sent exactly once.  CompleteMultipartUpload is not
+                # idempotent -- a re-send after the first attempt succeeded meets a consumed
+                # UploadId and comes back `NoSuchUpload`, so the code that reaches the caller
+                # belongs to the last attempt and says nothing about the upload.  Two
+                # different mechanisms re-send it and each needs its own stop: `retry=0` for
+                # core's loop in `make_request` (`retry_on` covers 408/502/503/504),
+                # `allow_redirects=False` for aiohttp following a 307/308 below that loop.
+                # Both are scoped to this request; the part transfers and the session
+                # creation keep the defaults.
+                retry=0,
+                allow_redirects=False,
+            )
+        except Exception as err:
+            _mark_commit_outcome_unknown(err)
+            raise
 
-        await resp.release()
+        # GRDM: S3 sends the status line before it starts assembling the parts, so a failure
+        # part way through arrives as 200 with an <Error> body.  `expects` only looks at the
+        # status, so without reading the body a failed commit reads as a completed upload.
+        try:
+            body = await resp.read()
+            await resp.release()
+        except Exception as err:
+            # GRDM: the request went out and the storage may well have acted on it.
+            # Failing to read the answer says nothing about what the answer was.
+            _mark_commit_outcome_unknown(err)
+            raise
+
+        try:
+            parsed = xmltodict.parse(body)
+        except Exception:
+            parsed = {}
+
+        error = parsed.get('Error')
+        if isinstance(error, dict):
+            # GRDM: carry the parsed code on the exception.  This is the one place the
+            # provider reads a code itself, so it is the one place `exception_from_response`'s
+            # `data` is not there to hold it -- and recovering it from the prose below would
+            # be a substring match on a message that also names the status.
+            error_code = self._error_code_of(error)
+            raise _mark_commit_outcome_unknown(_mark_observed_error_code(
+                exceptions.UploadError(
+                    'CompleteMultipartUpload answered {} with an error: {}'.format(
+                        resp.status, error_code or 'unknown'),
+                    code=HTTPStatus.BAD_GATEWAY
+                ),
+                error_code,
+            ))
+
+        # GRDM: success has to be stated, not merely not-contradicted.  Reading
+        # only `<Error>` meant an empty `<Error/>`, a scalar `<Error>`, a body that is not XML,
+        # a truncated body and an empty body all fell through to a normal return -- the user is
+        # told the file is on the storage, and it is not necessarily there.
+        #
+        # `CompleteMultipartUploadResult` plus an `ETag` is the whole of what S3 promises on a
+        # completed commit: the ETag is computed from the assembled object, so it exists only
+        # once the assembly has finished.  Anything else is a body nobody can read, which is
+        # evidence for neither outcome and therefore UNKNOWN -- the recoverable side, which is
+        # the direction required when the answer is illegible.
+        result = parsed.get('CompleteMultipartUploadResult')
+        if not isinstance(result, dict) or not result.get('ETag'):
+            raise _mark_commit_outcome_unknown(exceptions.UploadError(
+                'CompleteMultipartUpload answered {} with a body that does not report '
+                'success'.format(resp.status),
+                code=HTTPStatus.BAD_GATEWAY
+            ))
 
     async def delete(self, path, confirm_delete=0, **kwargs):
-        """Delete the key and all its versions at the specified path
+        """Deletes the key at the specified path
 
-        :param path: ( :class:`.WaterButlerPath` ) The path of the key to delete
+        :param str path: The path of the key to delete
         :param int confirm_delete: Must be 1 to confirm root folder delete
         """
         await self._check_region()
+
         if path.is_root:
             if not confirm_delete == 1:
                 raise exceptions.DeleteError(
                     'confirm_delete=1 is required for deleting root provider folder',
-                    code=HTTPStatus.BAD_REQUEST,
+                    code=400
                 )
-        logger.debug('Deleting path: %s', path.full_path)
-        if path.is_file:
-            # Retrieve and delete all versions (batched) similar to S3 provider
-            try:
-                prefix = path.full_path.lstrip('/')
-                query_params = {
-                    'Prefix': prefix,
-                    'Delimiter': '/',
-                    'VersionIdMarker': '',
-                }
-                _, versions, delete_markers = await self.get_full_revision(query_params)
-                full_version_list = versions + delete_markers
-                if full_version_list:
-                    version_dict = {
-                        path.full_path: [
-                            v.get('VersionId')
-                            for v in full_version_list
-                            if v.get('VersionId')
-                        ]
-                    }
 
-                    version_ids = version_dict[path.full_path]
-                    # AWS allows max 1000 objects per delete_objects call
-                    for i in range(0, len(version_ids), 1000):
-                        batch = version_ids[i: i + 1000]
-                        delete_list = [
-                            {'Key': path.full_path, 'VersionId': vid} for vid in batch
-                        ]
-                        # Run synchronous boto3 call in executor to avoid blocking
-                        loop = asyncio.get_event_loop()
-                        response = await loop.run_in_executor(
-                            None,
-                            lambda d=delete_list: self.bucket.delete_objects(
-                                Delete={'Objects': d, 'Quiet': False}
-                            ),
-                        )
-                        # Check for errors in response
-                        if 'Errors' in response and response['Errors']:
-                            error_count = len(response['Errors'])
-                            error_codes = [e.get('Code', 'Unknown') for e in response['Errors']]
-                            logger.error(
-                                'Errors deleting objects: count=%d, codes=%s', error_count, error_codes
-                            )
-                            raise exceptions.DeleteError(
-                                'Failed to delete some objects: {} error(s)'.format(error_count)
-                            )
-                        deleted_count = len(response.get('Deleted', []))
-                        logger.debug('Batch deleted %d versions', deleted_count)
-                else:
-                    # No versions -> delete current object directly
-                    query_parameters = {
-                        'Bucket': self.bucket_name,
-                        'Key': path.full_path,
-                    }
-                    resp = await self.make_request(
-                        'DELETE',
-                        functools.partial(
-                            self.connection.generate_presigned_url,
-                            'delete_object',
-                            Params=query_parameters,
-                            HttpMethod='DELETE',
-                        ),
-                        expects=(
-                            HTTPStatus.OK,
-                            HTTPStatus.NO_CONTENT,
-                        ),
-                        throws=exceptions.DeleteError,
-                    )
-                    await resp.release()
-            except exceptions.MetadataError:
-                # Versions cannot be retrieved (e.g. MinIO without versioning).
-                # Fall back to deleting the current version directly.
-                logger.debug('Version listing not available, falling back to direct delete')
-                query_parameters = {'Bucket': self.bucket_name, 'Key': path.full_path}
-                resp = await self.make_request(
-                    'DELETE',
-                    functools.partial(
-                        self.connection.generate_presigned_url,
-                        'delete_object',
-                        Params=query_parameters,
-                        HttpMethod='DELETE',
-                    ),
-                    expects=(
-                        HTTPStatus.OK,
-                        HTTPStatus.NO_CONTENT,
-                    ),
-                    throws=exceptions.DeleteError,
-                )
-                await resp.release()
+        if path.is_file:
+            # GRDM: purge every version of the key rather than issuing a plain DELETE.  On a
+            # versioned bucket a plain DELETE only writes a new delete marker, leaving all the
+            # previous versions -- and the storage they occupy -- behind.
+            await self._delete_file_versions(path)
         else:
             await self._delete_folder(path, **kwargs)
 
-    async def _delete_folder_prefix(self, prefix):
-        """Delete the folder prefix object (e.g. 'foldername/') from S3."""
-        query_parameters = {'Bucket': self.bucket_name, 'Key': prefix}
-        resp = await self.make_request(
-            'DELETE',
-            functools.partial(
-                self.connection.generate_presigned_url,
-                'delete_object',
-                Params=query_parameters,
-                HttpMethod='DELETE',
-            ),
-            expects=(
-                HTTPStatus.OK,
-                HTTPStatus.NO_CONTENT,
-            ),
-            throws=exceptions.DeleteError,
-        )
-        await resp.release()
+    async def _delete_file_versions(self, path):
+        """GRDM: delete every version and delete marker of a single key.
 
-    async def _folder_prefix_exists(self, folder_prefix):
-        # Even if the storage is MinIO, Contents with a leaf folder is
-        # returned when a last slash of a prefix is removed.
-        query_parameters = {
-            'Bucket': self.bucket_name,
-            'Prefix': folder_prefix.rstrip('/'),  # 'A/B/' -> 'A/B'
-            'Delimiter': '/'
-        }
-        resp = await self.make_request(
-            'GET',
-            functools.partial(
-                self.connection.generate_presigned_url,
-                'list_objects',
-                Params=query_parameters,
-                HttpMethod='GET',
-            ),
-            expects=(HTTPStatus.OK,),
-            throws=exceptions.MetadataError,
-        )
-        response_body = await resp.read()
-        parsed = xmltodict.parse(response_body, strip_whitespace=False)['ListBucketResult']
-        common_prefixes = parsed.get('CommonPrefixes', [])
-        if parsed.get('EncodingType') == 'url':
-            for item in (common_prefixes if isinstance(common_prefixes, list) else [common_prefixes]):
-                if 'Prefix' in item:
-                    item['Prefix'] = parse.unquote(item['Prefix'])
-        # common_prefixes is dict when returned prefix is one.
-        if not isinstance(common_prefixes, list):
-            common_prefixes = [common_prefixes]
-        for common_prefix in common_prefixes:
-            val = common_prefix.get('Prefix')
-            if val == folder_prefix:  # with last slash
-                return True
-        return False
+        :param *ProviderPath path: the file to purge
+        :raises: :class:`.DeleteError` if the versions cannot be listed or not all of them
+            could be deleted
+        """
+        try:
+            versions = await self.get_object_versions({'Prefix': path.path},
+                                                      include_delete_markers=True)
+        except exceptions.WaterButlerError as exc:
+            # Report the failure, not the provider's raw error document.
+            raise exceptions.DeleteError(
+                'Failed to list the versions of {}: {}'.format(path.path, type(exc).__name__),
+                code=exc.code
+            )
+        except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+            raise exceptions.DeleteError(
+                'Failed to list the versions of {}: {}'.format(path.path, type(exc).__name__)
+            )
+
+        # ``Prefix`` is a prefix match, so a listing for 'foo' also returns 'foo.bak'.
+        delete_requests = [
+            {'Key': version['Key'], 'VersionId': version['VersionId']}
+            for version in versions
+            if version.get('Key') == path.path and version.get('VersionId')
+        ]
+
+        await self.delete_objects_in_chunks(path.path, delete_requests)
 
     async def _delete_folder(self, path, **kwargs):
         """Query for recursive contents of folder and delete in batches of 1000
 
         Called from: func: delete if not path.is_file
 
-        Calls: func: self.make_request
-               func: self.connection.generate_presigned_url
+        Calls: func: self._check_region
 
         :param *ProviderPath path: Path to be deleted
+        :raises: :class:`.NotFoundError` if nothing at all is stored under the prefix
 
         On S3, folders are not first-class objects, but are instead inferred
         from the names of their children.  A regular DELETE request issued
         against a folder will not work unless that folder is completely empty.
         To fully delete an occupied folder, we must delete all of the comprising
         objects.  Amazon provides a bulk delete operation to simplify this.
+        # docs https://boto3.amazonaws.com/v1/documentation/api/1.28.0/reference/services/s3/client/delete_objects.html#delete-objects
+
+        GRDM: every version and delete marker under the prefix has to go, not just the live
+        keys.  On a versioned bucket a listing of live keys misses both the superseded
+        versions and the keys that are already delete-marked, so deleting a folder that way
+        leaves its whole history -- and the storage it occupies -- behind.
         """
-        if not path.full_path.endswith('/'):
-            raise exceptions.InvalidParameters('not a folder: {}'.format(str(path)))
+        await self._check_region()
 
-        prefix = path.full_path.lstrip('/')
-        list_query_params = {'Prefix': prefix}
         try:
-            parsed, versions, delete_markers = await self.get_full_revision(dict(list_query_params))
-        except exceptions.MetadataError:
-            # Versioning not supported. Fall back to a plain object listing.
-            all_objects = []
-            marker = None
-            while True:
-                query_params = {
-                    'Bucket': self.bucket_name,
-                    'Prefix': prefix,
-                    'MaxKeys': 1000,
-                }
-                if marker:
-                    query_params['Marker'] = marker
-                resp = await self.make_request(
-                    'GET',
-                    functools.partial(
-                        self.connection.generate_presigned_url,
-                        'list_objects',
-                        Params=query_params,
-                        HttpMethod='GET',
-                    ),
-                    expects=(HTTPStatus.OK,),
-                    throws=exceptions.MetadataError,
-                )
-                contents = await resp.read()
-                parsed = xmltodict.parse(
-                    contents.decode('utf-8'),
-                    strip_whitespace=False,
-                )['ListBucketResult']
-                objects = parsed.get('Contents', [])
-                if isinstance(objects, dict):
-                    objects = [objects]
-                if parsed.get('EncodingType') == 'url':
-                    for obj in objects:
-                        if 'Key' in obj:
-                            obj['Key'] = parse.unquote(obj['Key'])
-                all_objects.extend({'Key': obj['Key']} for obj in objects if obj.get('Key'))
+            versions = await self.get_object_versions({'Prefix': path.path},
+                                                      include_delete_markers=True)
+        except Exception as e:
+            # GRDM: the listing is made with `throws=DownloadError`, and the
+            # user who asked to delete a folder was being told a download went wrong -- with a
+            # status borrowed from an operation they did not ask for.  "Core reports this
+            # safely" holds only while the error carries no `data`; S3 answers a refused listing
+            # with a readable XML body, so `exception_from_response` puts its prose -- request id
+            # and host id included -- into `message`, and core hands that back unchanged.
+            self._raise_from_client_error(e, 'Could not list {} to delete it'.format(path.path),
+                                          exceptions.DeleteError)
 
-                if parsed.get('IsTruncated') == 'true':
-                    marker = parsed.get('NextMarker') or (all_objects[-1]['Key'] if all_objects else None)
-                else:
-                    break
-
-            if all_objects:
-                for i in range(0, len(all_objects), 1000):
-                    batch = all_objects[i:i + 1000]
-                    loop = asyncio.get_event_loop()
-                    response = await loop.run_in_executor(
-                        None,
-                        lambda d=batch: self.bucket.delete_objects(
-                            Delete={'Objects': d, 'Quiet': False}
-                        ),
-                    )
-                    if response.get('Errors'):
-                        error_count = len(response['Errors'])
-                        error_codes = [e.get('Code', 'Unknown') for e in response['Errors']]
-                        logger.error('_delete_folder fallback: %d delete error(s), codes=%s', error_count, error_codes)
-                        raise exceptions.DeleteError(
-                            'Failed to delete some objects: {} error(s)'.format(error_count)
-                        )
-            # Also clean up folder prefix
-            try:
-                await self._delete_folder_prefix(prefix)
-            except exceptions.DeleteError:
-                logger.warning('Failed to clean up folder prefix in _delete_folder fallback: %s', prefix)
-            return
-
-        if not versions and not delete_markers:
-            # No objects/versions -> treat as missing (parity with S3 provider)
+        # Neither a version nor a delete marker under the prefix: the folder does not exist.
+        # An empty folder is not this case -- S3 stores it as a 0-byte 'prefix/' key, which is
+        # one version of its own.
+        if not versions:
             raise exceptions.NotFoundError(str(path))
 
-        version_map = {}
-        keys_without_version = []
-        for item in versions + delete_markers:
-            key = item.get('Key')
-            if not key:
-                continue
-            version_id = item.get('VersionId')
-            if version_id:
-                version_map.setdefault(key, []).append(version_id)
-            else:
-                keys_without_version.append({'Key': key})
+        delete_requests = [
+            {'Key': version['Key'], 'VersionId': version['VersionId']}
+            for version in versions
+            if version.get('Key') and version.get('VersionId')
+        ]
 
-        all_objects = [
-            {'Key': k, 'VersionId': v} for k, vids in version_map.items() for v in vids
-        ] + keys_without_version
-        # AWS allows max 1000 objects per delete_objects call
-        for i in range(0, len(all_objects), 1000):
-            batch = all_objects[i: i + 1000]
-            # Run synchronous boto3 call in executor to avoid blocking
-            loop = asyncio.get_event_loop()
-            response = await loop.run_in_executor(
-                None,
-                lambda b=batch: self.bucket.delete_objects(
-                    Delete={'Objects': b, 'Quiet': False}
-                ),
-            )
-            # Check for errors in response
-            if 'Errors' in response and response['Errors']:
-                error_count = len(response['Errors'])
-                error_codes = [e.get('Code', 'Unknown') for e in response['Errors']]
-                logger.error(
-                    'Errors deleting folder objects: count=%d, codes=%s', error_count, error_codes
-                )
-                raise exceptions.DeleteError(
-                    'Failed to delete some objects: {} error(s)'.format(error_count)
-                )
-            deleted_count = len(response.get('Deleted', []))
-            logger.debug('Batch deleted %d objects from folder', deleted_count)
-
-        # Clean up folder prefix object if it still exists
-        if await self._folder_prefix_exists(prefix):
-            await self._delete_folder_prefix(prefix)
-
-    async def get_full_revision(self, query_params):
-        """
-        Get all versions and delete markers of the requested object
-        :param query_params: The query parameters to be used in the request
-        :return: The dict of response content, list versions and delete_markers
-        """
-        versions = []
-        delete_markers = []
-        more_to_come = True
-
-        while more_to_come:
-            query_parameters_dict = {'Bucket': self.bucket_name}
-            query_parameters_dict.update(query_params)
-            resp = await self.make_request(
-                'GET',
-                functools.partial(
-                    self.connection.generate_presigned_url,
-                    'list_object_versions',
-                    Params=query_parameters_dict,
-                    HttpMethod='GET',
-                ),
-                expects=(HTTPStatus.OK,),
-                throws=exceptions.MetadataError,
-            )
-
-            response_body = await resp.read()
-            parsed = xmltodict.parse(response_body.decode('utf-8'), strip_whitespace=False)['ListVersionsResult']
-
-            # Append current page's versions and delete markers
-            current_versions = parsed.get('Version', [])
-            current_delete_markers = parsed.get('DeleteMarker', [])
-
-            if isinstance(current_versions, dict):
-                current_versions = [current_versions]
-            if isinstance(current_delete_markers, dict):
-                current_delete_markers = [current_delete_markers]
-
-            # boto3 automatically adds encoding-type=url to presigned URLs
-            # for list_object_versions, causing MinIO to return URL-encoded
-            # keys (e.g. Japanese characters). Decode them so that
-            # delete_objects receives the actual key names.
-            if parsed.get('EncodingType') == 'url':
-                for item in current_versions:
-                    if 'Key' in item:
-                        item['Key'] = parse.unquote(item['Key'])
-                for item in current_delete_markers:
-                    if 'Key' in item:
-                        item['Key'] = parse.unquote(item['Key'])
-
-            versions.extend(current_versions)
-            delete_markers.extend(current_delete_markers)
-
-            # Check if more pages are available
-            more_to_come = parsed.get('IsTruncated') == 'true'
-            if more_to_come:
-                query_params['KeyMarker'] = parsed.get('NextKeyMarker')
-                if parsed.get('EncodingType') == 'url' and query_params['KeyMarker']:
-                    query_params['KeyMarker'] = parse.unquote(query_params['KeyMarker'])
-                query_params['VersionIdMarker'] = parsed.get('NextVersionIdMarker')
-
-        return parsed, versions, delete_markers
+        await self.delete_objects_in_chunks(path.path, delete_requests)
 
     async def revisions(self, path, **kwargs):
         """Get past versions of the requested key
 
-        :param path: ( :class:`.WaterButlerPath` ) The path to a key
+        :param str path: The path to a key
         :rtype list:
+        Docs: https://boto3.amazonaws.com/v1/documentation/api/1.28.0/reference/services/s3/client/list_object_versions.html
         """
         await self._check_region()
-        prefix = path.full_path.lstrip('/')  # '/' -> '', '/A/B' -> 'A/B'
-        query_parameters = {
-            'Bucket': self.bucket_name,
-            'Prefix': prefix,
-            'Delimiter': '/'
-        }
-        list_url = self.connection.generate_presigned_url('list_object_versions', Params=query_parameters, ExpiresIn=settings.TEMP_URL_SECS, HttpMethod='GET')
-        try:
-            resp = await self.make_request(
-                'GET',
-                list_url,
-                expects=(HTTPStatus.OK,),
-                throws=exceptions.MetadataError,
-            )
-        except exceptions.MetadataError as e:
-            # MinIO may not support "versions" from boto3 presigned url.
-            # (And, MinIO does not support ListObjectVersions yet.)
-            logger.info('ListObjectVersions may not be supported: %s', str(e))
-            return []
 
-        response_body = await resp.read()
-        xml = xmltodict.parse(response_body.decode('utf-8'))
-        versions = xml['ListVersionsResult'].get('Version') or []
+        query_params = {'Prefix': path.path, 'Delimiter': '/'}
 
-        if isinstance(versions, dict):
-            versions = [versions]
+        versions = await self.get_object_versions(query_params)
 
         return [
             S3Revision(item)
             for item in versions
-            if item['Key'] == prefix
+            if item['Key'] == path.path
         ]
 
     async def metadata(self, path, revision=None, **kwargs):
@@ -1052,143 +1366,109 @@ class S3Provider(provider.BaseProvider):
         :rtype: dict or list
         """
         await self._check_region()
-        if path.is_dir:
-            if 'next_token' in kwargs:
-                return await self._metadata_folder(path, kwargs['next_token'])
-            return (await self._metadata_folder(path))
 
-        return (await self._metadata_file(path, revision=revision))
+        if path.is_dir:
+            # GRDM: only the API layer asks for a page at a time, and it always passes
+            # `next_token` (None for the first page).  A caller that does not name the keyword
+            # -- `BaseProvider._folder_file_op`, `BaseProvider.zip`, `ZipStreamGenerator` --
+            # gets the complete listing, because those read `.name` off every element and a
+            # continuation token among them would raise part way through a copy or a download.
+            if 'next_token' in kwargs:
+                metadata = await self._metadata_folder(path, next_token=kwargs['next_token'] or '')
+            else:
+                metadata = await self._metadata_folder(path)
+            for item in metadata:
+                if isinstance(item, str):
+                    # the trailing continuation token, which has no `raw`
+                    continue
+                item.raw['base_folder'] = self.base_folder
+        else:
+            metadata = await self._metadata_file(path, revision=revision)
+            metadata.raw['base_folder'] = self.base_folder
+
+        return metadata
 
     def handle_data(self, data):
+        """GRDM: split the continuation token off a paged folder listing.
+
+        ``server.api.v1.provider.metadata`` calls this with whatever ``metadata()`` returned,
+        which is either a single file's metadata or a listing that may end with a token.
+
+        :return: ``(data, token)``, with ``token`` empty when the listing is complete
+        """
         token = None
-        if not isinstance(data, S3FileMetadataHeaders):
+        if isinstance(data, list) and data and isinstance(data[-1], str):
             token = data.pop()
 
         return data, token or ''
 
     async def create_folder(self, path, folder_precheck=True, **kwargs):
         """
-        :param path: ( :class:`.WaterButlerPath` ) The path to create a folder at
+        :param str path: The path to create a folder at
         """
         await self._check_region()
+
         WaterButlerPath.validate_folder(path)
 
         if folder_precheck:
             if (await self.exists(path)):
                 raise exceptions.FolderNamingConflict(path.name)
+        path_prefix = path.path
 
-        query_parameters = {'Bucket': self.bucket_name, 'Key': path.full_path}
+        # Docs: https://boto3.amazonaws.com/v1/documentation/api/1.28.0/reference/services/s3/client/put_object.html
+        folder_url = await self.generate_generic_presigned_url(path_prefix, method='put_object')
 
-        async with self.request(
+        await self.make_request(
             'PUT',
-            functools.partial(
-                self.connection.generate_presigned_url,
-                'put_object',
-                Params=query_parameters,
-                HttpMethod='PUT',
-            ),
+            folder_url,
             skip_auto_headers={'CONTENT-TYPE'},
-            expects=(
-                HTTPStatus.OK,
-                HTTPStatus.CREATED,
-            ),
-            throws=exceptions.CreateFolderError,
-        ):
-            return S3FolderMetadata({'Prefix': path.full_path})
+            expects=(200, 201,),
+            throws=exceptions.CreateFolderError
+        )
+
+        metadata = S3FolderMetadata({'Prefix': path_prefix})
+        metadata.raw['base_folder'] = self.base_folder
+        return metadata
 
     async def _metadata_file(self, path, revision=None):
+        await self._check_region()
+
         if revision == 'Latest':
             revision = None
-        query_parameters = {'Bucket': self.bucket_name, 'Key': path.full_path}
-        if revision:
-            query_parameters['VersionId'] = revision
+        path_prefix = path.path
 
-        resp = await self.make_request(
-            'HEAD',
-            functools.partial(
-                self.connection.generate_presigned_url,
-                'head_object',
-                Params=query_parameters,
-                HttpMethod='HEAD',
-            ),
-            expects=(HTTPStatus.OK,),
-            throws=exceptions.MetadataError,
-        )
+        resp = await self.check_key_existence(path_prefix, query_parameters={'VersionId': revision} if revision else {})
         await resp.release()
-        return S3FileMetadataHeaders(path.full_path, resp.headers)
+        return S3FileMetadataHeaders(path.path, resp.headers)
 
     async def _metadata_folder(self, path, next_token=None):
-        prefix = path.full_path.lstrip('/')  # '/' -> '', '/A/B' -> 'A/B'
-        query_parameters = {
-            'Bucket': self.bucket_name,
-            'Prefix': prefix,
-            'Delimiter': '/',
-            'MaxKeys': 1000,
-        }
-        if next_token:
-            query_parameters['Marker'] = next_token
+        await self._check_region()
 
-        resp = await self.make_request(
-            'GET',
-            functools.partial(
-                self.connection.generate_presigned_url,
-                'list_objects',
-                Params=query_parameters,
-                HttpMethod='GET',
-            ),
-            expects=(HTTPStatus.OK,),
-            throws=exceptions.MetadataError,
-        )
+        path_prefix = path.path
+        params = {'Prefix': path_prefix, 'Delimiter': '/', 'Bucket': self.bucket_name}
 
-        contents = await resp.read()
-        parsed = xmltodict.parse(contents.decode('utf-8'), strip_whitespace=False)['ListBucketResult']
-
-        next_token_string = parsed.get('NextMarker', '')
-        contents = parsed.get('Contents', [])
-        prefixes = parsed.get('CommonPrefixes', [])
-
-        if isinstance(contents, dict):
-            contents = [contents]
-        if isinstance(prefixes, dict):
-            prefixes = [prefixes]
-
-        # boto3 adds encoding-type=url to the presigned URL, so the storage may return
-        # URL-encoded keys. Decode them after XML parsing.
-        if parsed.get('EncodingType') == 'url':
-            for item in contents:
-                if 'Key' in item:
-                    item['Key'] = parse.unquote(item['Key'])
-            for item in prefixes:
-                if 'Prefix' in item:
-                    item['Prefix'] = parse.unquote(item['Prefix'])
-            if next_token_string:
-                next_token_string = parse.unquote(next_token_string)
+        contents, prefixes, continuation_token = await self.get_folder_metadata(
+            path_prefix, params, next_token=next_token)
 
         if not contents and not prefixes and not path.is_root:
             # If contents and prefixes are empty then this "folder"
             # must exist as a key with a / at the end of the name
             # if the path is root there is no need to test if it exists
-            query_parameters = {'Bucket': self.bucket_name, 'Key': prefix}
-            resp = await self.make_request(
-                'HEAD',
-                functools.partial(
-                    self.connection.generate_presigned_url,
-                    'head_object',
-                    Params=query_parameters,
-                    HttpMethod='HEAD',
-                ),
-                expects=(HTTPStatus.OK,),
-                throws=exceptions.MetadataError,
-            )
-            await resp.release()
+            await self.check_key_existence(path_prefix)
+
+        if isinstance(contents, dict):
+            contents = [contents]
+
+        if isinstance(prefixes, dict):
+            prefixes = [prefixes]
 
         items = [
             S3FolderMetadata(item)
-            for item in prefixes
+            for item in prefixes if item['Prefix'] != path_prefix
         ]
 
         for content in contents:
-            if content['Key'] == path.full_path:  # self
+            if content['Key'] == params['Prefix']:
                 continue
 
             if content['Key'].endswith('/'):
@@ -1196,27 +1476,22 @@ class S3Provider(provider.BaseProvider):
             else:
                 items.append(S3FileMetadata(content))
 
-        if next_token_string:
-            items.append(next_token_string)
+        # GRDM: the continuation token rides along as the last element so that a single
+        # metadata response can carry both a page and the cursor for the next one.
+        # `handle_data` splits it back off before the listing reaches the API layer.
+        if continuation_token:
+            items.append(continuation_token)
+
         return items
 
     async def _check_region(self):
         """
-        Lookup the region via bucket name, then rebuild the connection for that region.
-
-        Region Naming: http://docs.aws.amazon.com/general/latest/gr/rande.html#s3_region
+        Lookup the region via bucket name, then update the host to match.
         """
         if self.region is None:
             self.region = await self._get_bucket_region()
             if self.region == 'EU':
                 self.region = 'eu-west-1'
-
-            self.connection = S3Connection(
-                aws_access_key_id=self.aws_access_key_id,
-                aws_secret_access_key=self.aws_secret_access_key,
-                region_name=self.region or None,
-            )
-            self.bucket = self.connection.s3.Bucket(self.bucket_name)
 
         self.metrics.add('region', self.region)
 
@@ -1224,20 +1499,9 @@ class S3Provider(provider.BaseProvider):
         """Bucket names are unique across all regions.
 
         Endpoint doc:
-        http://docs.aws.amazon.com/AmazonS3/latest/API/RESTBucketGETlocation.html
+        https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/s3/client/get_bucket_location.html
         """
-        resp = await self.make_request(
-            'GET',
-            functools.partial(
-                self.connection.generate_presigned_url,
-                'get_bucket_location',
-                Params={'Bucket': self.bucket_name},
-                HttpMethod='GET',
-            ),
-            expects=(HTTPStatus.OK,),
-            throws=exceptions.MetadataError,
-        )
-
+        resp = await self.get_s3_bucket_object_location()
         contents = await resp.read()
         parsed = xmltodict.parse(contents, strip_whitespace=False)
         return parsed['LocationConstraint'].get('#text', '')

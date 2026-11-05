@@ -69,9 +69,13 @@ class S3FileMetadataHeaders(S3Metadata, metadata.BaseFileMetadata):
 
     @property
     def etag(self):
-        # Header names differ between storages and client libraries
-        etag_value = self.raw.get('ETag', self.raw.get('Etag', ''))
-        return etag_value.replace('"', '')
+        # ETag is used in boto3/aiobotocore, Etag is used in boto
+        # GRDM: S3 quotes the ETag header, so strip the quotes to match S3FileMetadata.
+        if 'ETag' in self.raw:
+            return self.raw['ETag'].replace('"', '')
+        elif 'Etag' in self.raw:
+            return self.raw['Etag'].replace('"', '')
+        return ''
 
     @property
     def extra(self):
