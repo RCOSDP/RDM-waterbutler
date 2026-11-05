@@ -166,10 +166,17 @@ class ProviderHandler(core.BaseHandler, CreateMixin, MetadataMixin, MoveCopyMixi
         self.reader = asyncio.StreamReader()
         reader_protocol = asyncio.StreamReaderProtocol(self.reader)
         loop = asyncio.get_running_loop()
-        await loop.connect_read_pipe(lambda: reader_protocol, self.rfd)
+        self.reader_transport, _ = await loop.connect_read_pipe(lambda: reader_protocol, self.rfd)
 
-        writer_transport, _ = await loop.connect_write_pipe(asyncio.Protocol, self.wfd)
-        self.writer = asyncio.StreamWriter(writer_transport, reader_protocol, self.reader, loop)
+        # The writer needs a protocol of its own: StreamWriter.drain() waits only while the
+        # protocol that belongs to the *write* transport has been told to pause. Bound to the
+        # reader's protocol, drain() never waits, the body is read from the client as fast as
+        # it arrives and the write transport buffers all of it in memory. StreamReaderProtocol
+        # provides the flow control and the close waiter that wait_closed() needs; its reader
+        # is never fed because the pipe is write-only.
+        writer_transport, writer_protocol = await loop.connect_write_pipe(
+            lambda: asyncio.StreamReaderProtocol(asyncio.StreamReader(loop=loop), loop=loop), self.wfd)
+        self.writer = asyncio.StreamWriter(writer_transport, writer_protocol, self.reader, loop)
 
         self.stream = RequestStreamReader(self.request, self.reader)
         self.uploader = asyncio.ensure_future(self.provider.upload(self.stream, self.target_path))

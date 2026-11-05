@@ -76,4 +76,5 @@ def mock_handler(http_request):
     handler.wfd = Mock()
     handler.writer = Mock()
     handler.writer.wait_closed = AsyncMock()
+    handler.reader_transport = Mock()
     return handler

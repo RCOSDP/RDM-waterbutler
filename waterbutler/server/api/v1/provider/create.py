@@ -111,6 +111,9 @@ class CreateMixin:
         self.metadata, created = await self.uploader
         self.writer.close()
         await self.writer.wait_closed()
+        # Stop polling the read end before its descriptor is closed below; the read transport
+        # only closes itself once it has seen the EOF, which may not have happened yet.
+        self.reader_transport.close()
         self.wsock.close()
         self.rsock.close()
         self.rfd.close()
