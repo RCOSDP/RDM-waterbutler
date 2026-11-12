@@ -93,6 +93,7 @@ def patch_make_provider_core(monkeypatch):
 def mock_intra(monkeypatch, request):
     src_provider = MockProvider()
     dest_provider = MockProvider()
+    src_provider.metadata.return_value = MockFileMetadata()
     mock_make_provider = mock.Mock(side_effect=[src_provider, dest_provider])
     monkeypatch.setattr(waterbutler.server.api.v1.provider.movecopy,
                         'make_provider',
@@ -113,6 +114,7 @@ def mock_intra(monkeypatch, request):
 def mock_inter(monkeypatch, request):
     src_provider = MockProvider()
     dest_provider = MockProvider()
+    src_provider.metadata.return_value = MockFileMetadata()
     mock_make_provider = mock.Mock(side_effect=[src_provider, dest_provider])
     monkeypatch.setattr(waterbutler.server.api.v1.provider.movecopy,
                         'make_provider',
