@@ -1,5 +1,12 @@
+from collections import OrderedDict
+
 import pytest
 
+from waterbutler.providers.s3.metadata import (
+    S3Metadata,
+    S3FileMetadata,
+    S3FileMetadataHeaders,
+)
 from tests.providers.s3.fixtures import (
     file_metadata_headers_object,
     file_header_metadata,
@@ -76,6 +83,38 @@ class TestFileMetadata:
         assert file_metadata_object._json_api_links('guid0') == links
 
 
+class TestEtagConsistency:
+    """HEAD and ListObjects must report the same ETag for one object."""
+
+    def _listing(self, quoted_etag):
+        return S3FileMetadata(OrderedDict(
+            Key='my-image.jpg',
+            LastModified='2009-10-12T17:50:30.000Z',
+            ETag=quoted_etag,
+            Size='434234',
+            StorageClass='STANDARD',
+        ))
+
+    @pytest.mark.parametrize('quoted_etag', ['"abc"', '"abc-4"'])
+    def test_headers_and_listing_agree(self, quoted_etag):
+        headers = S3FileMetadataHeaders('my-image.jpg', {
+            'Content-Length': '434234',
+            'Last-Modified': '2009-10-12T17:50:30.000Z',
+            'Content-Type': 'binary/octet-stream',
+            'ETag': quoted_etag,
+        })
+        listing = self._listing(quoted_etag)
+
+        assert headers.etag == listing.etag
+        assert headers.extra['md5'] == listing.extra['md5']
+        assert headers.serialized()['etag'] == listing.serialized()['etag']
+
+    def test_boto_spelling_of_the_header_agrees_too(self):
+        headers = S3FileMetadataHeaders('my-image.jpg', {'Etag': '"abc"'})
+
+        assert headers.etag == self._listing('"abc"').etag
+
+
 class TestFolderMetadata:
 
     def test_folder_metadata(self, folder_metadata_object):
@@ -136,3 +175,17 @@ class TestRevisionsMetadata:
 
         assert revision_metadata_object.version == '3/L4kqtJl40Nr8X8gdRQBpUMLUo'
 
+
+class TestNoHydrationHooks:
+    """The S3 half of the removed Celery serialization hooks is gone too.
+
+    ``S3FileMetadataHeaders`` overrode ``_dehydrate``/``_rehydrate`` to carry ``_path`` through
+    the payload.  With the base pair removed those overrides call a ``super()`` that no longer
+    exists, so leaving them behind would be a method that raises the moment anything reaches
+    it.  See ``tests.core.test_metadata.TestNoPayloadDrivenConstruction`` for why the pair went.
+    """
+
+    @pytest.mark.parametrize('name', ['dehydrate', '_dehydrate', 'rehydrate', '_rehydrate'])
+    def test_s3_metadata_has_no_hydration_hooks(self, name):
+        assert not hasattr(S3Metadata, name)
+        assert not hasattr(S3FileMetadataHeaders, name)
