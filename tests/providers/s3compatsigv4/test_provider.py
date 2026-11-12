@@ -12,12 +12,12 @@ from urllib import parse
 from unittest import mock
 
 import pytest
-from boto.compat import BytesIO
-from boto.utils import compute_md5
+from io import BytesIO
 
 from waterbutler.core import streams, metadata, exceptions
 from waterbutler.core.path import WaterButlerPath
 from waterbutler.providers.s3compatsigv4 import S3CompatSigV4Provider
+from waterbutler.providers.s3compatsigv4.provider import compute_md5
 from waterbutler.providers.s3compatsigv4 import settings as pd_settings
 
 from tests.utils import MockCoroutine

@@ -12,10 +12,10 @@ REPO_ROOT=$(git rev-parse --show-toplevel)
 cd "$REPO_ROOT"
 
 read -r -d '' container_script <<'BASH' || true
-pip install -r dev-requirements.txt
+poetry install --with dev
 invoke test
 BASH
 
 docker run --rm -t \
     -e TEST_BUILD="$TEST_BUILD" \
-    ${WB_TEST_IMAGE} bash -lc "$container_script"
+    ${WB_TEST_IMAGE} bash -c "$container_script"

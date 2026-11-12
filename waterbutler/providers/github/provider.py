@@ -314,7 +314,7 @@ class GitHubProvider(provider.BaseProvider):
 
     def can_intra_copy(self, other, path=None):
         return (
-            type(self) == type(other) and
+            type(self) is type(other) and
             self.repo == other.repo and
             self.owner == other.owner
         )
@@ -326,7 +326,7 @@ class GitHubProvider(provider.BaseProvider):
     async def intra_move(self, dest_provider, src_path, dest_path):
         return (await self._do_intra_move_or_copy(src_path, dest_path, False))
 
-    async def download(self, path: GitHubPath, range: Tuple[int, int]=None,  # type: ignore
+    async def download(self, path: GitHubPath, range: Tuple[int, int] = None,  # type: ignore
                        **kwargs) -> streams.ResponseStreamReader:
         """Get the stream to the specified file on github
         :param GitHubPath path: The path to the file on github

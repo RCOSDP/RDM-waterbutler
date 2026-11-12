@@ -115,10 +115,10 @@ class S3CompatB3Provider(provider.BaseProvider):
         return True
 
     def can_intra_copy(self, dest_provider, path=None):
-        return type(self) == type(dest_provider) and not path.is_dir
+        return type(self) is type(dest_provider) and not path.is_dir
 
     def can_intra_move(self, dest_provider, path=None):
-        return type(self) == type(dest_provider) and not path.is_dir
+        return type(self) is type(dest_provider) and not path.is_dir
 
     async def intra_copy(self, dest_provider, source_path, dest_path):
         """Copy key from one S3 Compatible Storage bucket to another. The credentials specified in
@@ -136,7 +136,7 @@ class S3CompatB3Provider(provider.BaseProvider):
         raises FileNotFoundError if the status from S3 is not 200
 
         :param str path: Path to the key you want to download
-        :param dict \*\*kwargs: Additional arguments that are ignored
+        :param dict **kwargs: Additional arguments that are ignored
         :rtype: :class:`waterbutler.core.streams.ResponseStreamReader`
         :raises: :class:`waterbutler.core.exceptions.DownloadError`
         """

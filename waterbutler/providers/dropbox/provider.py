@@ -71,7 +71,7 @@ class DropboxProvider(provider.BaseProvider):
     async def dropbox_request(self,
                               url: str,
                               body: dict,
-                              expects: typing.Tuple=(200, 409,),
+                              expects: typing.Tuple = (200, 409,),
                               *args,
                               **kwargs) -> dict:
         r"""Convenience wrapper around ``BaseProvider.make_request`` for simple Dropbox API calls.
@@ -106,7 +106,7 @@ class DropboxProvider(provider.BaseProvider):
             self.dropbox_conflict_error_handler(data, body.get('path', ''))
         return data
 
-    def dropbox_conflict_error_handler(self, data: dict, error_path: str='') -> None:
+    def dropbox_conflict_error_handler(self, data: dict, error_path: str = '') -> None:
         """Takes a standard Dropbox error response and an optional path and tries to throw a
         meaningful error based on it.
 
@@ -299,8 +299,8 @@ class DropboxProvider(provider.BaseProvider):
 
     async def download(self,  # type: ignore
                        path: WaterButlerPath,
-                       revision: str=None,
-                       range: typing.Tuple[int, int]=None,
+                       revision: str = None,
+                       range: typing.Tuple[int, int] = None,
                        **kwargs) -> streams.ResponseStreamReader:
         """
         Dropbox V2 API Files Download
@@ -336,7 +336,7 @@ class DropboxProvider(provider.BaseProvider):
     async def upload(self,  # type: ignore
                      stream: streams.BaseStream,
                      path: WaterButlerPath,
-                     conflict: str='replace',
+                     conflict: str = 'replace',
                      **kwargs) -> typing.Tuple[DropboxFileMetadata, bool]:
         """Upload file stream to Dropbox.  If file exceeds `CONTIGUOUS_UPLOAD_SIZE_LIMIT`, Dropbox's
         multipart upload endpoints will be used.
@@ -353,7 +353,7 @@ class DropboxProvider(provider.BaseProvider):
     async def _contiguous_upload(self,
                                  stream: streams.BaseStream,
                                  path: WaterButlerPath,
-                                 conflict: str='replace') -> dict:
+                                 conflict: str = 'replace') -> dict:
         """Upload file in a single request.
 
         API Docs: https://www.dropbox.com/developers/documentation/http/documentation#files-upload
@@ -388,7 +388,7 @@ class DropboxProvider(provider.BaseProvider):
         return data
 
     async def _chunked_upload(self, stream: streams.BaseStream, path: WaterButlerPath,
-                              conflict: str='replace') -> dict:
+                              conflict: str = 'replace') -> dict:
         """Chunked uploading is a 3-step process using Dropbox's "Upload Session".
 
         First, start a new upload session and receive an upload session ID.
@@ -504,7 +504,7 @@ class DropboxProvider(provider.BaseProvider):
         await resp.release()
 
     async def _complete_session(self, stream: streams.BaseStream, session_id: str,
-                                path: WaterButlerPath, conflict: str='replace') -> dict:
+                                path: WaterButlerPath, conflict: str = 'replace') -> dict:
         """Complete the chunked upload session.
 
         "Finish an upload session and save the uploaded data to the given file path. ... The maximum
@@ -545,7 +545,7 @@ class DropboxProvider(provider.BaseProvider):
 
         return await resp.json()
 
-    async def delete(self, path: WaterButlerPath, confirm_delete: int=0,  # type: ignore
+    async def delete(self, path: WaterButlerPath, confirm_delete: int = 0,  # type: ignore
                      **kwargs) -> None:  # type: ignore
         """Delete file, folder, or provider root contents
 
@@ -568,7 +568,7 @@ class DropboxProvider(provider.BaseProvider):
 
     async def metadata(self,  # type: ignore
                        path: WaterButlerPath,
-                       revision: str=None,
+                       revision: str = None,
                        **kwargs) \
                        -> typing.Union[BaseDropboxMetadata, typing.List[BaseDropboxMetadata]]:
         full_path = path.full_path.rstrip('/')
@@ -648,11 +648,11 @@ class DropboxProvider(provider.BaseProvider):
         return DropboxFolderMetadata(data['metadata'], self.folder, self.NAME)
 
     def can_intra_copy(self, dest_provider: provider.BaseProvider,
-                       path: WaterButlerPath=None) -> bool:
-        return type(self) == type(dest_provider)
+                       path: WaterButlerPath = None) -> bool:
+        return type(self) is type(dest_provider)
 
     def can_intra_move(self, dest_provider: provider.BaseProvider,
-                       path: WaterButlerPath=None) -> bool:
+                       path: WaterButlerPath = None) -> bool:
         return self == dest_provider  # dropbox can only intra move on same account
 
     def _build_content_url(self, *segments, **query):

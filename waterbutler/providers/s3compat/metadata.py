@@ -39,7 +39,7 @@ class S3CompatFileMetadataHeaders(S3CompatMetadata, metadata.BaseFileMetadata):
 
     @property
     def content_type(self):
-        return self.raw['Content-Type']
+        return self.raw.get('Content-Type', 'application/octet-stream')
 
     @property
     def modified(self):
@@ -51,12 +51,16 @@ class S3CompatFileMetadataHeaders(S3CompatMetadata, metadata.BaseFileMetadata):
 
     @property
     def etag(self):
-        return self.raw['Etag'].replace('"', '')
+        # Handle case-insensitive header lookup
+        etag_value = self.raw.get('ETag', self.raw.get('Etag', ''))
+        return etag_value.replace('"', '')
 
     @property
     def extra(self):
+        # Handle case-insensitive header lookup
+        etag_value = self.raw.get('ETag', self.raw.get('Etag', ''))
         return {
-            'md5': self.raw['Etag'].replace('"', ''),
+            'md5': etag_value.replace('"', ''),
             'encryption': self.raw.get('x-amz-server-side-encryption', '')
         }
 

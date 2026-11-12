@@ -140,8 +140,8 @@ class IQBRIMSProvider(provider.BaseProvider):
 
     async def download(self,  # type: ignore
                        path: IQBRIMSPath,
-                       revision: str=None,
-                       range: typing.Tuple[int, int]=None,
+                       revision: str = None,
+                       range: typing.Tuple[int, int] = None,
                        **kwargs) -> streams.BaseStream:  # type: ignore
         """Download the file at `path`.  If `revision` is present, attempt to download that revision
         of the file.  See **Revisions** in the class doctring for an explanation of this provider's
@@ -263,7 +263,7 @@ class IQBRIMSProvider(provider.BaseProvider):
 
     async def create_folder(self,
                             path: WaterButlerPath,
-                            folder_precheck: bool=True,
+                            folder_precheck: bool = True,
                             **kwargs) -> IQBRIMSFolderMetadata:
         IQBRIMSPath.validate_folder(path)
         self._test_permissions(path)
@@ -292,7 +292,7 @@ class IQBRIMSProvider(provider.BaseProvider):
 
     async def delete(self,  # type: ignore
                      path: IQBRIMSPath,
-                     confirm_delete: int=0,
+                     confirm_delete: int = 0,
                      **kwargs) -> None:
         """Given a WaterButlerPath, delete that path
         :param GoogleDrivePath path: Path to be deleted
@@ -338,7 +338,7 @@ class IQBRIMSProvider(provider.BaseProvider):
     async def copy(self, *args, **kwargs):
         raise exceptions.ReadOnlyProviderError(self.NAME)
 
-    def _build_query(self, folder_id: str, title: str=None) -> str:
+    def _build_query(self, folder_id: str, title: str = None) -> str:
         queries = [
             "'{}' in parents".format(folder_id),
             'trashed = false',
@@ -409,7 +409,7 @@ class IQBRIMSProvider(provider.BaseProvider):
     def _serialize_item(self,
                         path: wb_path.WaterButlerPath,
                         item: dict,
-                        raw: bool=False) -> typing.Union[BaseIQBRIMSMetadata, dict]:
+                        raw: bool = False) -> typing.Union[BaseIQBRIMSMetadata, dict]:
         if raw:
             return item
         if item['mimeType'] == self.FOLDER_MIME_TYPE:
@@ -494,7 +494,7 @@ class IQBRIMSProvider(provider.BaseProvider):
         if path.parts[1].value in self.permissions and 'WRITABLE' not in self.permissions[path.parts[1].value]:
             raise exceptions.ReadOnlyProviderError(self.NAME)
 
-    async def _handle_docs_versioning(self, path: IQBRIMSPath, item: dict, raw: bool=True):
+    async def _handle_docs_versioning(self, path: IQBRIMSPath, item: dict, raw: bool = True):
         """Sends an extra request to GDrive to fetch revision information for Google Docs. Needed
         because Google Docs use a different versioning system from regular files.
 
@@ -534,7 +534,7 @@ class IQBRIMSProvider(provider.BaseProvider):
 
         return self._serialize_item(path, item, raw=raw)
 
-    async def _folder_metadata(self, path: wb_path.WaterButlerPath, raw: bool=False) \
+    async def _folder_metadata(self, path: wb_path.WaterButlerPath, raw: bool = False) \
             -> typing.List[typing.Union[BaseIQBRIMSMetadata, dict]]:
         query = self._build_query(path.identifier)
         built_url = self.build_url('files', q=query, alt='json', maxResults=1000)
@@ -557,8 +557,8 @@ class IQBRIMSProvider(provider.BaseProvider):
 
     async def _file_metadata(self,
                              path: IQBRIMSPath,
-                             revision: str=None,
-                             raw: bool=False):
+                             revision: str = None,
+                             raw: bool = False):
         """ Returns metadata for the file identified by `path`.  If the `revision` arg is set,
         will attempt to return metadata for the given revision of the file.  If the revision does
         not exist, ``_file_metadata`` will throw a 404.
@@ -607,7 +607,7 @@ class IQBRIMSProvider(provider.BaseProvider):
         ) as resp:
             try:
                 data = await resp.json()
-            except Exception as e:  # some 404s return a string instead of json
+            except Exception:  # some 404s return a string instead of json
                 data = await resp.read()
 
         if resp.status != 200:

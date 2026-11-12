@@ -190,7 +190,7 @@ class AzureBlobStorageProvider(provider.BaseProvider):
     async def download(self, path, accept_url=False, version=None, range=None, **kwargs):
         """
         :param str path: Path to the key you want to download
-        :param dict \*\*kwargs: Additional arguments that are ignored
+        :param dict **kwargs: Additional arguments that are ignored
         :rtype: :class:`waterbutler.core.streams.ResponseStreamReader`
         :raises: :class:`waterbutler.core.exceptions.DownloadError`
         """
@@ -235,7 +235,7 @@ class AzureBlobStorageProvider(provider.BaseProvider):
 
             async def sub_upload():
                 while True:
-                    with await lock:
+                    async with lock:
                         sub_stream = ByteStream(await stream.read(MAX_UPLOAD_BLOCK_SIZE))
                         if sub_stream.size == 0:
                             return
@@ -245,8 +245,11 @@ class AzureBlobStorageProvider(provider.BaseProvider):
 
                     await self._put_block(sub_stream, path, block_id)
 
-            tasks = [sub_upload() for _ in range(UPLOAD_PARALLEL_NUM)]
-            await asyncio.wait(tasks)
+            tasks = [asyncio.ensure_future(sub_upload()) for _ in range(UPLOAD_PARALLEL_NUM)]
+            done, _ = await asyncio.wait(tasks)
+            for task in done:
+                # asyncio.wait does not raise task failures, so surface them here
+                task.result()
 
             await self._put_block_list(path, block_id_list)
 

@@ -1,3 +1,4 @@
+import asyncio
 from uuid import UUID
 from unittest import mock
 
@@ -81,6 +82,33 @@ class TestProviderHandler:
         handler = mock_handler(http_request)
         handler.target_path = WaterButlerPath('/file')
         await handler.prepare_stream()
+
+    @pytest.mark.asyncio
+    async def test_prepare_stream_applies_backpressure(self, http_request):
+        """data_received() must not outrun the provider reading the stream.
+
+        The provider here never reads, so once the pipe's buffers are full every further
+        write has to wait in drain(); without that, the whole upload body ends up in the
+        write transport's buffer and the process grows by the size of the file.
+        """
+        handler = mock_handler(http_request)
+        handler.target_path = WaterButlerPath('/file')
+        handler.provider.upload = MockCoroutine()
+        await handler.prepare_stream()
+        try:
+            chunk = b'x' * (256 * 1024)
+            with pytest.raises(asyncio.TimeoutError):
+                async with asyncio.timeout(1):
+                    for _ in range(64):  # 16 MB in total
+                        await handler.data_received(chunk)
+            assert handler.writer.transport.get_write_buffer_size() < len(chunk) * 4
+
+            consumed = await asyncio.wait_for(handler.reader.read(len(chunk)), timeout=1)
+            assert consumed
+        finally:
+            handler.writer.transport.abort()
+            handler.reader.feed_eof()
+            await asyncio.sleep(0)
 
     @pytest.mark.asyncio
     async def test_head(self, http_request):

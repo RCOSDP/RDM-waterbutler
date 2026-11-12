@@ -8,7 +8,6 @@ from unittest import mock
 
 import pytest
 from tornado import testing
-from tornado.platform.asyncio import AsyncIOMainLoop
 
 from waterbutler.server.app import make_app
 from waterbutler.core import metadata, provider
@@ -76,12 +75,6 @@ class MockStream(FileStreamReader):
 
     def __init__(self):
         super().__init__(tempfile.TemporaryFile())
-
-
-class MockRequestBody(asyncio.Future):
-
-    def __await__(self):
-        yield None
 
 
 class MockWriter(object):
@@ -159,9 +152,14 @@ class MockProvider2(MockProvider1):
 
 class HandlerTestCase(testing.AsyncHTTPTestCase):
 
+    prior_eventloop = None
+
     def setUp(self):
         policy = asyncio.get_event_loop_policy()
-        policy.get_event_loop().close()
+        try:
+            self.prior_eventloop = policy.get_event_loop()
+        except RuntimeError:
+            self.prior_eventloop = None
         self.event_loop = policy.new_event_loop()
         policy.set_event_loop(self.event_loop)
 
@@ -199,12 +197,16 @@ class HandlerTestCase(testing.AsyncHTTPTestCase):
             self.send_hook_patcher.stop()
         self.make_provider_patcher.stop()
         self.event_loop.close()
+        # Leave a usable loop behind: restore the previous one if it is still open,
+        # otherwise install a fresh one so later synchronous code does not get a closed loop.
+        policy = asyncio.get_event_loop_policy()
+        if self.prior_eventloop is not None and not self.prior_eventloop.is_closed():
+            policy.set_event_loop(self.prior_eventloop)
+        else:
+            policy.set_event_loop(policy.new_event_loop())
 
     def get_app(self):
         return make_app(debug=False)
-
-    def get_new_ioloop(self):
-        return AsyncIOMainLoop()
 
 
 class MultiProviderHandlerTestCase(HandlerTestCase):

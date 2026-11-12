@@ -37,9 +37,26 @@ class CRUDHandler(core.BaseProviderHandler):
     async def prepare_stream(self):
         if self.request.method in self.STREAM_METHODS:
             self.rsock, self.wsock = socket.socketpair()
+            self.rsock.setblocking(False)
+            self.wsock.setblocking(False)
 
-            self.reader, _ = await asyncio.open_unix_connection(sock=self.rsock)
-            _, self.writer = await asyncio.open_unix_connection(sock=self.wsock)
+            self.rfd = os.fdopen(self.rsock.detach(), 'rb', 0)
+            self.wfd = os.fdopen(self.wsock.detach(), 'wb', 0)
+
+            self.reader = asyncio.StreamReader()
+            reader_protocol = asyncio.StreamReaderProtocol(self.reader)
+            loop = asyncio.get_running_loop()
+            self.reader_transport, _ = await loop.connect_read_pipe(lambda: reader_protocol, self.rfd)
+
+            # The writer needs a protocol of its own: StreamWriter.drain() waits only while the
+            # protocol that belongs to the *write* transport has been told to pause. Bound to the
+            # reader's protocol, drain() never waits, the body is read from the client as fast as
+            # it arrives and the write transport buffers all of it in memory. StreamReaderProtocol
+            # provides the flow control and the close waiter that wait_closed() needs; its reader
+            # is never fed because the pipe is write-only.
+            writer_transport, writer_protocol = await loop.connect_write_pipe(
+                lambda: asyncio.StreamReaderProtocol(asyncio.StreamReader(loop=loop), loop=loop), self.wfd)
+            self.writer = asyncio.StreamWriter(writer_transport, writer_protocol, self.reader, loop)
 
             self.stream = RequestStreamReader(self.request, self.reader)
 
@@ -120,7 +137,14 @@ class CRUDHandler(core.BaseProviderHandler):
         self.write(metadata.serialized())
 
         self.writer.close()
+        await self.writer.wait_closed()
+        # Stop polling the read end before its descriptor is closed below; the read transport
+        # only closes itself once it has seen the EOF, which may not have happened yet.
+        self.reader_transport.close()
         self.wsock.close()
+        self.rsock.close()
+        self.rfd.close()
+        self.wfd.close()
 
         self._send_hook(
             'create' if created else 'update',

@@ -738,7 +738,7 @@ class S3Provider(provider.BaseProvider):
         """
         if file_size is None or file_size > self.FILE_SIZE_INTRA_COPY_LIMIT:
             return False
-        return type(self) == type(dest_provider) and not path.is_dir
+        return type(self) is type(dest_provider) and not path.is_dir
 
     def can_intra_move(self, dest_provider, path=None, file_size=None):
         """GRDM: an intra move is a CopyObject followed by a delete, so it has the same cap.
@@ -747,7 +747,7 @@ class S3Provider(provider.BaseProvider):
         """
         if file_size is None or file_size > self.FILE_SIZE_INTRA_COPY_LIMIT:
             return False
-        return type(self) == type(dest_provider) and not path.is_dir
+        return type(self) is type(dest_provider) and not path.is_dir
 
     async def intra_copy(self, dest_provider, source_path, dest_path):
         """Copy key from one S3 bucket to another. The credentials specified in

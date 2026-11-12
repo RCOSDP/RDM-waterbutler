@@ -1,3 +1,4 @@
+import asyncio
 from http import client
 from unittest import mock
 
@@ -275,6 +276,7 @@ class TestUploadFile:
 
         handler = mock_handler(http_request)
         handler.resource = '3rqws'
+        handler.uploader = asyncio.Future()
         handler.uploader.set_result((mock_file_metadata, True))
         handler.set_status = mock.Mock()
 
@@ -292,6 +294,7 @@ class TestUploadFile:
 
         handler = mock_handler(http_request)
         handler.resource = '3rqws'
+        handler.uploader = asyncio.Future()
         handler.uploader.set_result((mock_file_metadata, False))
         handler.set_status = mock.Mock()
 

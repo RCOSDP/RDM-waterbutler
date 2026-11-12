@@ -305,9 +305,9 @@ class OSFStorageProvider(provider.BaseProvider):
                    dest_provider: provider.BaseProvider,
                    src_path: WaterButlerPath,
                    dest_path: WaterButlerPath,
-                   rename: str=None,
-                   conflict: str='replace',
-                   handle_naming: bool=True) -> typing.Tuple[BaseMetadata, bool]:
+                   rename: str = None,
+                   conflict: str = 'replace',
+                   handle_naming: bool = True) -> typing.Tuple[BaseMetadata, bool]:
         """Override parent's move to support cross-region osfstorage moves while preserving guids
         and versions. Delegates to :meth:`.BaseProvider.move` when destination is not osfstorage.
         If both providers are in the same region (i.e. `.can_intra_move` is true), then calls that.
@@ -369,9 +369,9 @@ class OSFStorageProvider(provider.BaseProvider):
                    dest_provider: provider.BaseProvider,
                    src_path: WaterButlerPath,
                    dest_path: WaterButlerPath,
-                   rename: str=None,
-                   conflict: str='replace',
-                   handle_naming: bool=True,
+                   rename: str = None,
+                   conflict: str = 'replace',
+                   handle_naming: bool = True,
                    version=None) -> typing.Tuple[BaseMetadata, bool]:
         """Override parent's copy to support cross-region osfstorage copies. Delegates to
         :meth:`.BaseProvider.copy` when destination is not osfstorage. If both providers are in the
